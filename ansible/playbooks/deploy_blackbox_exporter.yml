@@ -1,0 +1,9 @@
+---
+# Deploy prometheus-blackbox-exporter on k3s-main.
+# Phase 2b of the homelab monitoring rollout.
+
+- hosts: k3s-main
+  become: true
+  gather_facts: false
+  roles:
+    - blackbox_exporter

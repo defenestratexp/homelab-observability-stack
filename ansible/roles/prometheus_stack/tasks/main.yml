@@ -1,0 +1,107 @@
+---
+# Deploy kube-prometheus-stack on k3s-main.
+# Mirrors the pattern used by external_secrets_operator.yml.
+
+- name: Verify k3s is running
+  command: /usr/local/bin/k3s kubectl version --client
+  changed_when: false
+
+- name: Check if helm is installed
+  command: which helm
+  register: prometheus_stack_helm_check
+  failed_when: false
+  changed_when: false
+
+- name: Install helm if not present
+  shell: |
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  when: prometheus_stack_helm_check.rc != 0
+
+- name: Stage values file on the target host
+  copy:
+    src: "{{ prometheus_stack_values_file }}"
+    dest: "{{ prometheus_stack_remote_values_path }}"
+    mode: "0644"
+
+- name: Show resolved values file path (controller side)
+  debug:
+    msg: "Using helm values from: {{ prometheus_stack_values_file }}"
+
+- name: Add prometheus-community helm repo
+  command: >
+    helm repo add {{ prometheus_stack_helm_repo_name }} {{ prometheus_stack_helm_repo_url }}
+  environment:
+    KUBECONFIG: "{{ prometheus_stack_kubeconfig }}"
+  register: prometheus_stack_helm_repo_add
+  changed_when: "'has been added' in prometheus_stack_helm_repo_add.stdout"
+  failed_when:
+    - prometheus_stack_helm_repo_add.rc != 0
+    - "'already exists' not in prometheus_stack_helm_repo_add.stderr"
+
+- name: Update helm repos
+  command: helm repo update
+  environment:
+    KUBECONFIG: "{{ prometheus_stack_kubeconfig }}"
+  changed_when: false
+
+- name: Apply monitoring namespace
+  command: >
+    /usr/local/bin/k3s kubectl apply -f -
+  args:
+    stdin: |
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: {{ prometheus_stack_namespace }}
+        labels:
+          purpose: prometheus-stack
+  register: prometheus_stack_ns_apply
+  changed_when: "'created' in prometheus_stack_ns_apply.stdout or 'configured' in prometheus_stack_ns_apply.stdout"
+
+- name: Helm upgrade --install kube-prometheus-stack
+  command: >
+    helm upgrade --install
+    {{ prometheus_stack_release_name }}
+    {{ prometheus_stack_chart }}
+    --namespace {{ prometheus_stack_namespace }}
+    --values {{ prometheus_stack_remote_values_path }}
+    {% if prometheus_stack_chart_version %}--version {{ prometheus_stack_chart_version }}{% endif %}
+    --wait --timeout {{ prometheus_stack_helm_timeout }}
+  environment:
+    KUBECONFIG: "{{ prometheus_stack_kubeconfig }}"
+  register: prometheus_stack_helm_apply
+
+- name: Show helm output
+  debug:
+    var: prometheus_stack_helm_apply.stdout_lines
+
+- name: Wait for Prometheus pod to become ready
+  command: >
+    /usr/local/bin/k3s kubectl wait --for=condition=ready pod
+    -l app.kubernetes.io/name=prometheus
+    -n {{ prometheus_stack_namespace }}
+    --timeout=300s
+  register: prometheus_stack_prom_ready
+  retries: 3
+  delay: 10
+  until: prometheus_stack_prom_ready.rc == 0
+
+- name: Wait for Alertmanager pod to become ready
+  command: >
+    /usr/local/bin/k3s kubectl wait --for=condition=ready pod
+    -l app.kubernetes.io/name=alertmanager
+    -n {{ prometheus_stack_namespace }}
+    --timeout=300s
+  register: prometheus_stack_am_ready
+  retries: 3
+  delay: 10
+  until: prometheus_stack_am_ready.rc == 0
+
+- name: Show pods in monitoring namespace
+  command: /usr/local/bin/k3s kubectl get pods -n {{ prometheus_stack_namespace }}
+  register: prometheus_stack_pods
+  changed_when: false
+
+- name: Display pod status
+  debug:
+    var: prometheus_stack_pods.stdout_lines

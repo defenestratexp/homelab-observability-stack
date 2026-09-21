@@ -1,0 +1,175 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: logging-system
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k3s-main
+      securityContext:
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+      initContainers:
+        - name: fetch-secrets
+          image: amazon/aws-cli:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache jq > /dev/null 2>&1 || true
+              aws secretsmanager get-secret-value \
+                --secret-id homelab/grafana/admin-password \
+                --output json | jq -r '.SecretString' | tr -d '\n' > /secrets/admin-password
+              echo "Grafana admin password fetched from Secrets Manager"
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_REGION
+              value: us-west-2
+          volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+      containers:
+        - name: grafana
+          image: grafana/grafana:10.2.3
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: TZ
+              value: America/Los_Angeles
+            - name: GF_INSTALL_PLUGINS
+              value: ""
+            - name: GF_SECURITY_ADMIN_PASSWORD__FILE
+              value: /secrets/admin-password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards-syslog
+              mountPath: /var/lib/grafana/dashboards/syslog-overview.json
+              subPath: syslog-overview.json
+            - name: dashboards-guacamole
+              mountPath: /var/lib/grafana/dashboards/guacamole.json
+              subPath: guacamole.json
+            - name: dashboards-security
+              mountPath: /var/lib/grafana/dashboards/security-auth.json
+              subPath: security-auth.json
+            - name: dashboards-nginx
+              mountPath: /var/lib/grafana/dashboards/nginx-proxy.json
+              subPath: nginx-proxy.json
+            - name: dashboards-coredns
+              mountPath: /var/lib/grafana/dashboards/coredns.json
+              subPath: coredns.json
+            - name: dashboards-jenkins
+              mountPath: /var/lib/grafana/dashboards/jenkins.json
+              subPath: jenkins.json
+            - name: dashboards-host-explorer
+              mountPath: /var/lib/grafana/dashboards/host-explorer.json
+              subPath: host-explorer.json
+            - name: dashboards-kroki
+              mountPath: /var/lib/grafana/dashboards/kroki-system.json
+              subPath: kroki-system.json
+            - name: dashboards-eternal
+              mountPath: /var/lib/grafana/dashboards/eternal-system.json
+              subPath: eternal-system.json
+            - name: dashboards-external-secrets
+              mountPath: /var/lib/grafana/dashboards/external-secrets.json
+              subPath: external-secrets.json
+            - name: config
+              mountPath: /etc/grafana/grafana.ini
+              subPath: grafana.ini
+            - name: data
+              mountPath: /var/lib/grafana
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: secrets
+          emptyDir:
+            medium: Memory
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: dashboards-syslog
+          configMap:
+            name: grafana-dashboard-syslog
+        - name: dashboards-guacamole
+          configMap:
+            name: grafana-dashboard-guacamole
+        - name: dashboards-security
+          configMap:
+            name: grafana-dashboard-security
+        - name: dashboards-nginx
+          configMap:
+            name: grafana-dashboard-nginx
+        - name: dashboards-coredns
+          configMap:
+            name: grafana-dashboard-coredns
+        - name: dashboards-jenkins
+          configMap:
+            name: grafana-dashboard-jenkins
+        - name: dashboards-host-explorer
+          configMap:
+            name: grafana-dashboard-host-explorer
+        - name: dashboards-kroki
+          configMap:
+            name: grafana-dashboard-kroki
+        - name: dashboards-eternal
+          configMap:
+            name: grafana-dashboard-eternal
+        - name: dashboards-external-secrets
+          configMap:
+            name: grafana-dashboard-external-secrets
+        - name: config
+          configMap:
+            name: grafana-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: grafana-data-pvc

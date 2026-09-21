@@ -1,0 +1,50 @@
+---
+# Deploy prometheus-blackbox-exporter on k3s-main.
+# Mirrors the prometheus_stack role's helm-install pattern.
+
+- name: Verify k3s is running
+  command: /usr/local/bin/k3s kubectl version --client
+  changed_when: false
+
+- name: Stage values file on the target host
+  copy:
+    src: "{{ blackbox_values_file }}"
+    dest: "{{ blackbox_remote_values_path }}"
+    mode: "0644"
+
+- name: Helm upgrade --install blackbox-exporter
+  command: >
+    helm upgrade --install
+    {{ blackbox_release_name }}
+    {{ blackbox_chart }}
+    --namespace {{ blackbox_namespace }}
+    --values {{ blackbox_remote_values_path }}
+    {% if blackbox_chart_version %}--version {{ blackbox_chart_version }}{% endif %}
+    --wait --timeout {{ blackbox_helm_timeout }}
+  environment:
+    KUBECONFIG: "{{ blackbox_kubeconfig }}"
+  register: blackbox_helm_apply
+
+- name: Show helm output
+  debug:
+    var: blackbox_helm_apply.stdout_lines
+
+- name: Wait for blackbox-exporter pod ready
+  command: >
+    /usr/local/bin/k3s kubectl wait --for=condition=ready pod
+    -l app.kubernetes.io/name=prometheus-blackbox-exporter
+    -n {{ blackbox_namespace }}
+    --timeout=120s
+  register: blackbox_ready
+  retries: 3
+  delay: 10
+  until: blackbox_ready.rc == 0
+
+- name: Show pod status
+  command: /usr/local/bin/k3s kubectl get pods -n {{ blackbox_namespace }} -l app.kubernetes.io/name=prometheus-blackbox-exporter
+  register: blackbox_pods
+  changed_when: false
+
+- name: Display pod status
+  debug:
+    var: blackbox_pods.stdout_lines

@@ -1,0 +1,96 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: logging-system
+data:
+  vector.yaml: |
+    data_dir: /vector-data-dir
+
+    # Sources
+    sources:
+      # Kubernetes pod logs from this cluster
+      kubernetes_logs:
+        type: kubernetes_logs
+        auto_partial_merge: true
+
+      # Syslog listener for network hosts (UDP)
+      syslog_udp:
+        type: syslog
+        address: "0.0.0.0:514"
+        mode: udp
+
+    # Transforms
+    transforms:
+      # Add cluster label to k8s logs
+      kubernetes_enriched:
+        type: remap
+        inputs:
+          - kubernetes_logs
+        source: |
+          .cluster = "k3s-main"
+          .source_type = "kubernetes"
+          .namespace = .kubernetes.pod_namespace
+          .pod = .kubernetes.pod_name
+          .container = .kubernetes.container_name
+          app_label = get(.kubernetes.pod_labels, ["app"]) ?? null
+          app_k8s_label = get(.kubernetes.pod_labels, ["app.kubernetes.io/name"]) ?? null
+          if app_label != null {
+            .app = app_label
+          } else if app_k8s_label != null {
+            .app = app_k8s_label
+          } else {
+            .app = "unknown"
+          }
+
+      # Parse and enrich syslog
+      syslog_enriched:
+        type: remap
+        inputs:
+          - syslog_udp
+        source: |
+          .source_type = "syslog"
+          .cluster = "network"
+          # Use hostname from syslog message
+          if exists(.hostname) && .hostname != null {
+            .host = to_string!(.hostname)
+          } else {
+            .host = "unknown"
+          }
+          .host_type = "server"
+          # Fix timestamp - use current time to avoid timezone parsing issues
+          .timestamp = now()
+
+    # Sinks
+    sinks:
+      # Send K8s logs to Loki
+      loki_kubernetes:
+        type: loki
+        inputs:
+          - kubernetes_enriched
+        endpoint: http://loki:3100
+        encoding:
+          codec: json
+        labels:
+          source_type: "{{ source_type }}"
+          cluster: "{{ cluster }}"
+          namespace: "{{ namespace }}"
+          pod: "{{ pod }}"
+          container: "{{ container }}"
+          app: "{{ app }}"
+        remove_label_fields: true
+        out_of_order_action: accept
+
+      # Send syslog to Loki
+      loki_syslog:
+        type: loki
+        inputs:
+          - syslog_enriched
+        endpoint: http://loki:3100
+        encoding:
+          codec: json
+        labels:
+          source_type: syslog
+          cluster: network
+        remove_label_fields: true
+        out_of_order_action: accept

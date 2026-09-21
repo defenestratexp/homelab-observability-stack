@@ -1,0 +1,10 @@
+---
+# Vector Agent Deployment
+# Installs Vector on hosts to collect and ship host metrics to Loki
+
+- name: Deploy Vector agent for host metrics
+  hosts: vector_agent_hosts
+  gather_facts: true
+  become: true
+  roles:
+    - vector_agent

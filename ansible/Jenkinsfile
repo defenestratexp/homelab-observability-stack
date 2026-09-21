@@ -1,0 +1,132 @@
+@Library('homelab-jenkins-lib') _
+
+// Parameterised Ansible runner. Each playbook in this repo is deployed by
+// picking it from the PLAYBOOK choice below; the job clones the repo and runs
+// ansible-playbook inside a pinned Ansible image pulled from ECR.
+//
+// Trimmed from the original homelab job (which dispatches many more
+// playbooks) down to the observability playbooks in this repo.
+
+pipeline {
+    agent { label 'ansible' }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10', daysToKeepStr: '30'))
+        // Global cap on any playbook run. Prevents a wedged run from holding
+        // an executor indefinitely.
+        timeout(time: 2, unit: 'HOURS')
+    }
+
+    parameters {
+        choice(
+            name: 'PLAYBOOK',
+            choices: [
+                'playbooks/deploy_prometheus_stack.yml', // Deploy kube-prometheus-stack on the k3s control node
+                'playbooks/deploy_prometheus_rules.yml', // Apply all PrometheusRule / Probe CRDs (alert rules)
+                'playbooks/deploy_alertmanager_ntfy_bridge.yml', // Deploy alertmanager-ntfy bridge for ntfy publishing
+                'playbooks/deploy_blackbox_exporter.yml', // Deploy blackbox-exporter for synthetic checks
+                'playbooks/deploy_node_exporter.yml', // Install prometheus node_exporter on monitored_hosts
+                'playbooks/deploy_jenkins_metrics.yml', // Publish Jenkins agent/queue health as node_exporter textfile metrics
+                'playbooks/vector_agent.yml', // Deploy Vector agent for host metrics to Loki
+                'playbooks/configure_rsyslog_forwarding.yml', // Configure rsyslog to forward to Vector
+                'playbooks/configure_log_heartbeat.yml', // Install 1/min syslog heartbeat for liveness detection
+            ],
+            description: 'Choose which Ansible playbook to run'
+        )
+        string(
+            name: 'EXTRA_VARS',
+            defaultValue: '',
+            description: 'Extra variables for Ansible --extra-vars. Key=value pairs only. For host scoping use the LIMIT parameter below.'
+        )
+        string(
+            name: 'LIMIT',
+            defaultValue: '',
+            description: 'Restrict the playbook to a subset of inventory hosts/groups via ansible --limit. Leave empty to target the playbook\'s hosts: declaration as-is.'
+        )
+    }
+
+    environment {
+        GIT_REPO = 'git@github.com:example/homelab-observability-stack.git'
+        ANSIBLE_HOST_KEY_CHECKING = 'False'
+        ECR_REGISTRY = '123456789012.dkr.ecr.us-west-2.amazonaws.com'
+        ECR_IMAGE = '123456789012.dkr.ecr.us-west-2.amazonaws.com/homelab-ansible:latest'
+        AWS_REGION = 'us-west-2'
+        LAN_DNS = '192.0.2.169'
+    }
+
+    stages {
+        stage('Clone and Run Ansible Playbook') {
+            steps {
+                script {
+                    def selectedPlaybook = params.PLAYBOOK
+
+                    withCredentials([
+                        sshUserPrivateKey(credentialsId: 'homelab-gh-key', keyFileVariable: 'GH_KEY'),
+                        sshUserPrivateKey(credentialsId: 'deploy_ansible', keyFileVariable: 'ANSIBLE_KEY'),
+                        string(credentialsId: 'ansible_vault_pass', variable: 'VAULT_PASS'),
+                        string(credentialsId: 'ansible_become_pass', variable: 'BECOME_PASS'),
+                        [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'ecr-credentials', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']
+                    ]) {
+                        sh """
+                            mkdir -p ~/.ssh
+                            cp "$GH_KEY" ~/.ssh/id_rsa
+                            chmod 600 ~/.ssh/id_rsa
+                            git config --global core.sshCommand "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa"
+
+                            git clone "$GIT_REPO" repo
+                            cd repo/ansible
+
+                            echo "$VAULT_PASS" > vault_pass.txt
+                            chmod 600 vault_pass.txt
+                            echo "$BECOME_PASS" > become_pass.txt
+                            chmod 600 become_pass.txt
+
+                            EXTRA_VARS_STR=""
+                            if [ -n "${params.EXTRA_VARS}" ]; then
+                                EXTRA_VARS_STR="${params.EXTRA_VARS}"
+                            fi
+
+                            LIMIT_FLAG=""
+                            if [ -n "${params.LIMIT}" ]; then
+                                LIMIT_FLAG="--limit ${params.LIMIT}"
+                            fi
+
+                            # Login to ECR using the amazon/aws-cli container
+                            docker run --rm \\
+                                -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \\
+                                -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \\
+                                amazon/aws-cli ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+
+                            docker run --rm -i \\
+                                --dns=${LAN_DNS} \\
+                                -v \$(pwd):/ansible \\
+                                -v $ANSIBLE_KEY:/root/.ssh/id_rsa:ro \\
+                                -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \\
+                                -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \\
+                                -e AWS_DEFAULT_REGION=${AWS_REGION} \\
+                                -w /ansible \\
+                                ${ECR_IMAGE} \\
+                                sh -c "ansible-playbook -i inventory/hosts.yml --vault-password-file vault_pass.txt --become-password-file become_pass.txt \$LIMIT_FLAG --extra-vars '\$EXTRA_VARS_STR' ${selectedPlaybook}"
+
+                            rm -f vault_pass.txt become_pass.txt
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                // Lead the notification with the playbook (and target, when
+                // scoped) so "job FAILED" is actionable on its own.
+                def pb  = (params.PLAYBOOK ?: 'unknown').replaceFirst('^playbooks/', '')
+                def lim = params.LIMIT?.trim()
+                def ctx = lim ? "${pb} → ${lim}" : pb
+                cleanWs()
+                notifyJenkinsBuild(context: ctx)
+            }
+        }
+    }
+}

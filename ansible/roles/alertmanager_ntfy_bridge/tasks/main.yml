@@ -1,0 +1,84 @@
+---
+# Deploy alexbakker/alertmanager-ntfy as the Alertmanager → ntfy bridge
+# in the monitoring namespace on k3s-main.
+
+- name: Fetch ntfy admin token from AWS Secrets Manager
+  set_fact:
+    bridge_ntfy_token: "{{ lookup('amazon.aws.aws_secret', bridge_ntfy_token_secret_id, region=bridge_aws_region) }}"
+  no_log: true
+
+- name: Render Secret manifest
+  template:
+    src: secret.yaml.j2
+    dest: /tmp/alertmanager-ntfy-secret.yaml
+    mode: "0600"
+  no_log: true
+
+- name: Render Deployment manifest
+  template:
+    src: deployment.yaml.j2
+    dest: /tmp/alertmanager-ntfy-deployment.yaml
+    mode: "0644"
+
+- name: Render Service manifest
+  template:
+    src: service.yaml.j2
+    dest: /tmp/alertmanager-ntfy-service.yaml
+    mode: "0644"
+
+- name: Apply Secret
+  command: >
+    /usr/local/bin/k3s kubectl apply -f /tmp/alertmanager-ntfy-secret.yaml
+  register: bridge_secret_apply
+  changed_when: "'configured' in bridge_secret_apply.stdout or 'created' in bridge_secret_apply.stdout"
+  no_log: true
+
+- name: Apply Deployment
+  command: >
+    /usr/local/bin/k3s kubectl apply -f /tmp/alertmanager-ntfy-deployment.yaml
+  register: bridge_deploy_apply
+  changed_when: "'configured' in bridge_deploy_apply.stdout or 'created' in bridge_deploy_apply.stdout"
+
+- name: Apply Service
+  command: >
+    /usr/local/bin/k3s kubectl apply -f /tmp/alertmanager-ntfy-service.yaml
+  register: bridge_svc_apply
+  changed_when: "'configured' in bridge_svc_apply.stdout or 'created' in bridge_svc_apply.stdout"
+
+# alertmanager-ntfy reads /etc/alertmanager-ntfy/config.yaml ONCE at startup.
+# The Secret is mounted, so `kubectl apply` updates the file but the running
+# process never re-reads it, and the Deployment itself is unchanged so nothing
+# rolls. Without this the playbook reports success while the bridge keeps
+# serving the old notification templates — which is exactly what happened on
+# 2026-09-14. Roll the pod whenever the config actually changed.
+- name: Restart bridge so a changed config is actually loaded
+  command: >
+    /usr/local/bin/k3s kubectl -n {{ bridge_namespace }}
+    rollout restart deployment/{{ bridge_name }}
+  when: bridge_secret_apply is changed
+
+- name: Wait for bridge Deployment to roll out
+  command: >
+    /usr/local/bin/k3s kubectl -n {{ bridge_namespace }}
+    rollout status deployment/{{ bridge_name }} --timeout=120s
+  register: bridge_rollout
+  changed_when: false
+
+- name: Show bridge pod status
+  command: >
+    /usr/local/bin/k3s kubectl -n {{ bridge_namespace }} get pods -l app={{ bridge_name }}
+  register: bridge_pods
+  changed_when: false
+
+- name: Display bridge pod status
+  debug:
+    var: bridge_pods.stdout_lines
+
+- name: Clean up rendered manifests on target
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/alertmanager-ntfy-secret.yaml
+    - /tmp/alertmanager-ntfy-deployment.yaml
+    - /tmp/alertmanager-ntfy-service.yaml

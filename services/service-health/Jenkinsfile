@@ -1,0 +1,151 @@
+@Library('homelab-jenkins-lib') _
+
+// Service health checks across the homelab infrastructure. Reads
+// applications/service-health/services.yaml and runs the appropriate
+// probe per `check_type`. Failures publish to the `monitoring` ntfy
+// topic with the failed-service list.
+//
+// Hysteresis: notifyNtfy fires only when we cross from N-1 to N consecutive
+// failures (default N=5 ≈ 25 minutes on a 5-min cron). Earlier failures still
+// mark the build as FAILURE for the dashboard, but we don't page on single-
+// tick blips (especially common for Cloudflare-tunneled services with momentary
+// latency spikes). Recovery notification also only fires if the streak that
+// just ended was ≥ N — symmetric: don't recover-spam either.
+
+// How many consecutive FAILURE builds before we page. Cron is every 5 min,
+// so N=5 ≈ 25 min of sustained failure before notifying.
+def HYSTERESIS_N = 5
+
+// Walk currentBuild.previousBuild back, counting FAILURE/UNSTABLE runs until
+// we hit a SUCCESS or the start of build history. Caller adds 1 to include
+// the current (failing) run.
+def countPriorFailureStreak() {
+    int streak = 0
+    def b = currentBuild.previousBuild
+    while (b != null && b.currentResult != 'SUCCESS') {
+        streak++
+        b = b.previousBuild
+    }
+    return streak
+}
+
+pipeline {
+    agent { label 'ops' }
+
+    triggers {
+        cron('H/5 * * * *')
+    }
+
+    options {
+        buildDiscarder(logRotator(daysToKeepStr: '3', numToKeepStr: '200'))
+        timeout(time: 3, unit: 'MINUTES')
+        // Cron ticks must never stack. Both stages run on `agent { label 'ops' }`,
+        // so without this each tick starts a pipeline and then blocks waiting for
+        // a heavyweight executor as a PlaceholderTask — and those do NOT coalesce
+        // in the queue. On 2026-09-14 a wedged homelab-updates-scheduled build held an
+        // executor for 32h and these two jobs stacked to 655 queued builds, which
+        // then drained as an ntfy flood. disableConcurrentBuilds() keeps at most
+        // one queued build per job, which Jenkins does coalesce.
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Run service checks') {
+            steps {
+                script {
+                    sh 'python3 -c "import yaml" 2>/dev/null || pip3 install --quiet pyyaml'
+                    def rc = sh(
+                        returnStatus: true,
+                        script: 'cd applications/service-health && python3 check.py > /tmp/service-health.kv',
+                    )
+                    sh 'cat /tmp/service-health.kv'
+                    def kv = readFile('/tmp/service-health.kv')
+                        .split('\n')
+                        .findAll { it.contains('=') }
+                        .collectEntries { line -> def p = line.split('=', 2); [(p[0]): (p.size() > 1 ? p[1] : '')] }
+
+                    if (rc == 0) {
+                        // Silent success — the post block will fire a recovery
+                        // notification if the previous streak crossed N.
+                        return
+                    }
+
+                    // Include this failing build in the streak count.
+                    int streak = countPriorFailureStreak() + 1
+                    boolean shouldNotify = (streak == HYSTERESIS_N)
+                    echo "service-health: failure streak now ${streak} (N=${HYSTERESIS_N}, notify=${shouldNotify})"
+
+                    if (rc == 2) {
+                        if (shouldNotify) {
+                            notifyNtfy(
+                                topic: 'monitoring',
+                                title: 'Service health: setup error (sustained)',
+                                message: "check.py exited 2 for ${streak} consecutive runs — inventory unreadable or PyYAML missing.\nBuild: ${env.BUILD_URL}",
+                                tags: ['question'],
+                            )
+                        }
+                        error('Setup error')
+                    }
+                    // rc == 1: at least one service failed.
+                    def total = kv['services_total'] ?: '?'
+                    def failedCount = kv['services_failed'] ?: '?'
+                    def failedNames = kv['failed'] ?: '(none)'
+                    if (shouldNotify) {
+                        notifyNtfy(
+                            topic: 'monitoring',
+                            title: "Service health: ${failedCount}/${total} services down (${streak} ticks)",
+                            message: "Failing for ${streak} consecutive checks (≈${streak * 5} min).\nFailing now: ${failedNames}\n\nFull list with reasons in the build log:\n${env.BUILD_URL}console",
+                            tags: ['x', 'rotating_light'],
+                            priority: 'high',
+                        )
+                    }
+                    error("${failedCount} service(s) failed: ${failedNames}")
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                def status = currentBuild.currentResult
+                def previous = currentBuild.previousBuild?.currentResult
+                if (status == 'SUCCESS' && previous != null && previous != 'SUCCESS') {
+                    // Only recover-page if the failure streak that just ended
+                    // had crossed the alert threshold. Otherwise the original
+                    // blip was suppressed and a recovery notification would be
+                    // surprising/noisy.
+                    int endedStreak = countPriorFailureStreak()
+                    if (endedStreak >= HYSTERESIS_N) {
+                        notifyNtfy(
+                            topic: 'monitoring',
+                            title: 'Service health: all green again',
+                            message: "Recovered after ${endedStreak} consecutive failures (≈${endedStreak * 5} min). ${env.BUILD_URL}",
+                            tags: ['white_check_mark', 'green_heart'],
+                        )
+                    } else {
+                        echo "service-health: recovered after ${endedStreak}-tick blip (< N=${HYSTERESIS_N}); no recovery notification sent"
+                    }
+                }
+
+                // Healthchecks.io deadman heartbeat. Fired on every run
+                // (success OR failure) — its job is to prove "Jenkins is
+                // alive and this job is still running on cadence", which is
+                // independent of whether services are healthy. If pings stop
+                // arriving, healthchecks.io alerts via email (out-of-band so
+                // it survives our own infra going dark).
+                //
+                // Suffixed with the build result so the HC log shows the
+                // overall trend without HC having to know what we're checking.
+                try {
+                    withCredentials([string(credentialsId: 'hc-deadman-jenkins', variable: 'HC_URL')]) {
+                        def suffix = (status == 'SUCCESS') ? '' : '/fail'
+                        sh "curl -fsS -m 5 -o /dev/null \"\$HC_URL${suffix}\" || echo 'hc ping failed (best-effort)'"
+                    }
+                } catch (e) {
+                    echo "Healthcheck deadman: credential 'hc-deadman-jenkins' not found, skipping ping"
+                }
+            }
+        }
+    }
+}

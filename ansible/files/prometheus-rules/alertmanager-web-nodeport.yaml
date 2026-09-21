@@ -1,0 +1,24 @@
+# Companion NodePort so the Alertmanager web UI (active alerts + silence
+# management) is reachable from a browser via the k3s-util nginx-proxy.
+# The helm-managed kps-alertmanager service stays ClusterIP; this is a
+# separate, additive Service selecting the same alertmanager pods.
+# Routed by the nginx reverse proxy (alertmanager.example.internal +
+# alertmanager.home.example.com) → 192.0.2.68:30099.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kps-alertmanager-web
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alertmanager
+    homelab.io/purpose: browser-access
+spec:
+  type: NodePort
+  selector:
+    alertmanager: kps-alertmanager
+    app.kubernetes.io/name: alertmanager
+  ports:
+    - name: http-web
+      port: 9093
+      targetPort: 9093
+      nodePort: 30099

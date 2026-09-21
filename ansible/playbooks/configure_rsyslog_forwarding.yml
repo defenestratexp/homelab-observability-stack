@@ -1,0 +1,79 @@
+---
+# Configure rsyslog to forward logs to centralized Vector collector
+# Vector listens on k3s-main:31514 UDP
+#
+# Usage: Run via Jenkins with PLAYBOOK=playbooks/configure_rsyslog_forwarding.yml
+# Target: local_servers group (or specific hosts via --limit)
+
+- name: Configure rsyslog forwarding to Vector
+  hosts: local_servers
+  become: true
+  vars:
+    vector_host: "192.0.2.68"  # k3s-main
+    vector_port: "31514"
+    rsyslog_conf_file: "/etc/rsyslog.d/60-forward-to-vector.conf"
+
+  tasks:
+    - name: Check if rsyslog is installed
+      ansible.builtin.command: which rsyslogd
+      register: rsyslog_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install rsyslog if not present
+      ansible.builtin.package:
+        name: rsyslog
+        state: present
+      when: rsyslog_check.rc != 0
+
+    - name: Create rsyslog forwarding configuration
+      ansible.builtin.copy:
+        dest: "{{ rsyslog_conf_file }}"
+        content: |
+          # Forward all logs to Vector on k3s-main
+          # Configured by ansible/playbooks/configure_rsyslog_forwarding.yml
+
+          # Set the hostname explicitly (avoids localhost from /etc/hosts)
+          $LocalHostName {{ inventory_hostname }}
+
+          # Retry forever instead of suspending the action on transient errors.
+          # We tried the modern action(type="omfwd" ...) form on 2026-05-13 to
+          # get the same behavior, but its default wire format was not parseable
+          # by Vector's syslog_udp source on notes-host/remote-host/pve2 (older
+          # rsyslog versions emit a slightly different on-wire shape). The
+          # legacy "*.* @host:port" form produces output Vector accepts on every
+          # host, and these $Action* directives give us retry-forever on top.
+          $ActionResumeRetryCount -1
+          $ActionResumeInterval 30
+          *.* @{{ vector_host }}:{{ vector_port }}
+        mode: '0644'
+        owner: root
+        group: root
+      register: rsyslog_config
+
+    - name: Detect init system
+      ansible.builtin.command: pidof systemd
+      register: systemd_check
+      changed_when: false
+      failed_when: false
+
+    - name: Restart rsyslog (systemd)
+      ansible.builtin.systemd:
+        name: rsyslog
+        state: restarted
+        enabled: true
+      when: systemd_check.rc == 0
+
+    - name: Restart rsyslog (sysvinit)
+      ansible.builtin.command: /etc/init.d/rsyslog restart
+      when: systemd_check.rc != 0
+
+    - name: Verify rsyslog is running
+      ansible.builtin.command: pgrep rsyslogd
+      register: rsyslog_running
+      changed_when: false
+      failed_when: rsyslog_running.rc != 0
+
+    - name: Send test log message
+      ansible.builtin.command: logger -t ansible-test "rsyslog forwarding configured on {{ inventory_hostname }}"
+      changed_when: false

@@ -1,0 +1,240 @@
+---
+# Vector agent installation and configuration
+
+- name: Detect init system
+  shell: |
+    if pidof systemd > /dev/null; then
+      echo "systemd"
+    else
+      echo "sysv"
+    fi
+  register: init_system_check
+  changed_when: false
+
+- name: Set init system fact
+  set_fact:
+    init_system: "{{ init_system_check.stdout }}"
+
+- name: Display target info
+  debug:
+    msg: "Installing Vector agent on {{ inventory_hostname }} ({{ init_system }})"
+
+# Install Vector using the official script
+- name: Check if Vector is already installed
+  command: which vector
+  register: vector_installed
+  changed_when: false
+  failed_when: false
+
+- name: Download Vector installation script
+  get_url:
+    url: https://sh.vector.dev
+    dest: /tmp/vector-install.sh
+    mode: '0755'
+  when: vector_installed.rc != 0
+
+- name: Install Vector
+  shell: /tmp/vector-install.sh -y 2>&1
+  register: vector_install_output
+  when: vector_installed.rc != 0
+  environment:
+    VECTOR_VERSION: "{{ vector_version }}"
+
+- name: Show Vector install output
+  debug:
+    var: vector_install_output.stdout_lines
+  when: vector_install_output is defined and vector_install_output.stdout_lines is defined
+
+- name: Check if Vector binary exists at install location
+  stat:
+    path: /root/.vector/bin/vector
+  register: vector_binary
+
+- name: Create symlink for Vector binary
+  file:
+    src: /root/.vector/bin/vector
+    dest: /usr/bin/vector
+    state: link
+  when: vector_binary.stat.exists
+  notify:
+    - restart vector
+    - restart vector sysv
+
+- name: Ensure Vector config directory exists
+  file:
+    path: "{{ vector_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Ensure Vector data directory exists
+  file:
+    path: "{{ vector_data_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Deploy Vector configuration
+  template:
+    src: vector.yaml.j2
+    dest: "{{ vector_config_dir }}/vector.yaml"
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - restart vector
+    - restart vector sysv
+
+# Systemd service file
+- name: Create Vector systemd service file
+  copy:
+    dest: /etc/systemd/system/vector.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Vector observability agent
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/vector --config {{ vector_config_dir }}/vector.yaml
+      Restart=always
+      RestartSec=5
+      StandardOutput=journal
+      StandardError=journal
+
+      [Install]
+      WantedBy=multi-user.target
+  when: init_system == "systemd"
+  notify:
+    - restart vector
+
+- name: Enable and start Vector (systemd)
+  systemd:
+    name: vector
+    enabled: true
+    state: started
+    daemon_reload: yes
+  when: init_system == "systemd"
+
+# SysV init script for MX Linux and similar
+- name: Create Vector init script (SysV)
+  copy:
+    dest: /etc/init.d/vector
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      ### BEGIN INIT INFO
+      # Provides:          vector
+      # Required-Start:    $network $remote_fs
+      # Required-Stop:     $network $remote_fs
+      # Default-Start:     2 3 4 5
+      # Default-Stop:      0 1 6
+      # Short-Description: Vector observability agent
+      # Description:       Collects and ships metrics and logs
+      ### END INIT INFO
+
+      DAEMON=/usr/bin/vector
+      CONFIG={{ vector_config_dir }}/vector.yaml
+      PIDFILE=/var/run/vector.pid
+      LOGFILE=/var/log/vector.log
+
+      start() {
+          echo "Starting vector..."
+          if [ -f $PIDFILE ] && kill -0 $(cat $PIDFILE) 2>/dev/null; then
+              echo "vector is already running"
+              return 1
+          fi
+          nohup $DAEMON --config $CONFIG > $LOGFILE 2>&1 &
+          echo $! > $PIDFILE
+          echo "vector started"
+      }
+
+      stop() {
+          echo "Stopping vector..."
+          if [ -f $PIDFILE ]; then
+              kill $(cat $PIDFILE) 2>/dev/null
+              rm -f $PIDFILE
+          fi
+          pkill -f "vector.*--config" 2>/dev/null
+          echo "vector stopped"
+      }
+
+      status() {
+          if [ -f $PIDFILE ] && kill -0 $(cat $PIDFILE) 2>/dev/null; then
+              echo "vector is running (PID: $(cat $PIDFILE))"
+          elif pgrep -f "vector.*--config" > /dev/null; then
+              echo "vector is running"
+          else
+              echo "vector is not running"
+          fi
+      }
+
+      case "$1" in
+          start)
+              start
+              ;;
+          stop)
+              stop
+              ;;
+          restart)
+              stop
+              sleep 1
+              start
+              ;;
+          status)
+              status
+              ;;
+          *)
+              echo "Usage: $0 {start|stop|restart|status}"
+              exit 1
+              ;;
+      esac
+      exit 0
+  when: init_system == "sysv"
+
+- name: Enable Vector at boot (SysV)
+  command: update-rc.d vector defaults
+  when: init_system == "sysv"
+  register: sysv_enable
+  changed_when: "'already exist' not in sysv_enable.stderr"
+  failed_when: false
+
+- name: Start Vector (SysV)
+  shell: /etc/init.d/vector start
+  when: init_system == "sysv"
+  register: sysv_start
+  changed_when: "'already running' not in sysv_start.stdout"
+  failed_when: false
+
+- name: Force restart Vector (systemd)
+  systemd:
+    name: vector
+    state: restarted
+    daemon_reload: yes
+  when: init_system == "systemd"
+
+- name: Force restart Vector (SysV)
+  shell: /etc/init.d/vector restart
+  when: init_system == "sysv"
+
+- name: Wait for Vector to start
+  pause:
+    seconds: 3
+
+- name: Verify Vector is running
+  shell: pgrep -f "vector" || echo "not running"
+  register: vector_status
+  changed_when: false
+
+- name: Display Vector status
+  debug:
+    msg: |
+      Vector agent configured on {{ inventory_hostname }}
+      Init System: {{ init_system }}
+      Config: {{ vector_config_dir }}/vector.yaml
+      Sending metrics to: {{ vector_loki_endpoint }}
+      Status: {{ "Running" if "not running" not in vector_status.stdout else "Check manually" }}

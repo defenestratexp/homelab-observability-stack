@@ -1,0 +1,497 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-security
+  namespace: logging-system
+  labels:
+    grafana_dashboard: "1"
+data:
+  security-auth.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 50},
+                  {"color": "red", "value": 100}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "id": 1,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum(count_over_time({source_type=\"syslog\"} |~ \"sshd\" |~ \"Accepted|session opened\" [1h]))",
+              "instant": true,
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "SSH Sessions (1h)",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "blue", "value": null},
+                  {"color": "yellow", "value": 20},
+                  {"color": "orange", "value": 50}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum(count_over_time({source_type=\"syslog\"} |~ \"sudo\" |~ \"COMMAND\" [1h]))",
+              "instant": true,
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Sudo Commands (1h)",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 5}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum(count_over_time({source_type=\"syslog\"} |~ \"sshd|sudo|su\" |~ \"Failed|failed|Invalid|invalid|denied|FAILED\" [1h]))",
+              "instant": true,
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Failed Attempts (1h)",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "purple", "value": null}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum(count_over_time({source_type=\"syslog\"} |~ \"sshd|sudo|su|login|systemd-logind\" [1h]))",
+              "instant": true,
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Total Auth Events (1h)",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false}
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 4},
+          "id": 5,
+          "options": {
+            "legend": {"displayMode": "list", "placement": "right", "showLegend": true},
+            "pieType": "pie",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": true},
+            "tooltip": {"mode": "single", "sort": "none"}
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum by (hostname) (count_over_time({source_type=\"syslog\"} |~ \"sshd|sudo\" | json [1h]))",
+              "instant": true,
+              "legendFormat": "{{hostname}}",
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Auth Events by Host",
+          "type": "piechart"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false}
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 4},
+          "id": 6,
+          "options": {
+            "legend": {"displayMode": "list", "placement": "right", "showLegend": true},
+            "pieType": "pie",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": true},
+            "tooltip": {"mode": "single", "sort": "none"}
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum by (appname) (count_over_time({source_type=\"syslog\"} | json | appname=~\"sshd|sudo|su|systemd-logind\" [1h]))",
+              "instant": true,
+              "legendFormat": "{{appname}}",
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Events by Service",
+          "type": "piechart"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false}
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 4},
+          "id": 7,
+          "options": {
+            "legend": {"displayMode": "list", "placement": "right", "showLegend": true},
+            "pieType": "pie",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": true},
+            "tooltip": {"mode": "single", "sort": "none"}
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "topk(10, sum by (hostname) (count_over_time({source_type=\"syslog\"} |~ \"sudo\" |~ \"COMMAND\" | json [1h])))",
+              "instant": true,
+              "legendFormat": "{{hostname}}",
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Sudo Commands by Host",
+          "type": "piechart"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "bars",
+                "fillOpacity": 50,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "normal"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{"color": "green", "value": null}]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+          "id": 8,
+          "options": {
+            "legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum by (hostname) (count_over_time({source_type=\"syslog\"} |~ \"sshd|sudo\" | json [5m]))",
+              "legendFormat": "{{hostname}}",
+              "queryType": "range",
+              "refId": "A"
+            }
+          ],
+          "title": "Auth Activity Over Time",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+          "id": 9,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "{source_type=\"syslog\"} |~ \"sshd\" | json | line_format \"{{.hostname}} {{.message}}\"",
+              "queryType": "range",
+              "refId": "A"
+            }
+          ],
+          "title": "SSH Logs",
+          "type": "logs"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+          "id": 10,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "{source_type=\"syslog\"} |~ \"sudo\" |~ \"COMMAND\" | json | line_format \"{{.hostname}} {{.message}}\"",
+              "queryType": "range",
+              "refId": "A"
+            }
+          ],
+          "title": "Sudo Commands",
+          "type": "logs"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 28},
+          "id": 11,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "{source_type=\"syslog\"} |~ \"Failed|failed|Invalid|invalid|denied|FAILED|error\" |~ \"sshd|sudo|su|auth|login\" | json | line_format \"{{.hostname}} [{{.appname}}] {{.message}}\"",
+              "queryType": "range",
+              "refId": "A"
+            }
+          ],
+          "title": "Failed Auth Attempts",
+          "type": "logs"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "tags": ["security", "auth", "ssh", "sudo"],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "",
+      "title": "Security / Auth Overview",
+      "uid": "security-auth",
+      "version": 1,
+      "weekStart": ""
+    }

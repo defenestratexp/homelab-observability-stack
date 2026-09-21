@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ bridge_name }}
+  namespace: {{ bridge_namespace }}
+  labels:
+    app: {{ bridge_name }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ bridge_name }}
+  ports:
+    - name: http
+      port: {{ bridge_listen_port }}
+      targetPort: {{ bridge_listen_port }}
+      protocol: TCP

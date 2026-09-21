@@ -1,0 +1,122 @@
+---
+# Install + run prometheus node_exporter as a systemd service.
+# Phase 1 supports systemd hosts only. SysV (MX Linux) support can be added
+# alongside if/when we apply this to MX hosts.
+
+- name: Detect init system
+  command: ps -p 1 -o comm=
+  register: node_exporter_init_check
+  changed_when: false
+
+- name: Fail loudly on non-systemd hosts
+  fail:
+    msg: |
+      node_exporter role currently supports systemd only.
+      Detected init: {{ node_exporter_init_check.stdout }}.
+      If this host needs node_exporter, extend the role with a SysV unit
+      using the docker_install.yml dual-init pattern.
+  when: "'systemd' not in node_exporter_init_check.stdout"
+
+- name: Create node_exporter group
+  group:
+    name: "{{ node_exporter_group }}"
+    system: true
+    state: present
+
+- name: Create node_exporter user
+  user:
+    name: "{{ node_exporter_user }}"
+    group: "{{ node_exporter_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: /
+    create_home: false
+    state: present
+
+- name: Check whether node_exporter binary already exists at the desired version
+  command: "{{ node_exporter_install_dir }}/node_exporter --version"
+  register: node_exporter_existing
+  failed_when: false
+  changed_when: false
+
+- name: Download and stage node_exporter
+  when: node_exporter_existing.rc != 0 or node_exporter_version not in node_exporter_existing.stderr|default('')
+  block:
+    - name: Download node_exporter tarball
+      get_url:
+        url: "{{ node_exporter_download_url }}"
+        dest: "/tmp/{{ node_exporter_archive }}"
+        mode: "0644"
+        timeout: 60
+
+    - name: Extract node_exporter
+      unarchive:
+        src: "/tmp/{{ node_exporter_archive }}"
+        dest: /tmp/
+        remote_src: true
+
+    - name: Install node_exporter binary
+      copy:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}/node_exporter"
+        dest: "{{ node_exporter_install_dir }}/node_exporter"
+        owner: "{{ node_exporter_user }}"
+        group: "{{ node_exporter_group }}"
+        mode: "0755"
+        remote_src: true
+
+    - name: Clean up extracted directory
+      file:
+        path: "/tmp/node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}"
+        state: absent
+
+    - name: Clean up tarball
+      file:
+        path: "/tmp/{{ node_exporter_archive }}"
+        state: absent
+
+- name: Create textfile collector directory
+  file:
+    path: "{{ node_exporter_textfile_dir }}"
+    state: directory
+    owner: root
+    group: "{{ node_exporter_group }}"
+    mode: "0775"
+
+- name: Install systemd unit
+  template:
+    src: node_exporter.service.j2
+    dest: /etc/systemd/system/node_exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart node_exporter
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: true
+
+- name: Enable and start node_exporter
+  systemd:
+    name: node_exporter
+    state: started
+    enabled: true
+
+- name: Wait for node_exporter to respond on its port
+  uri:
+    url: "http://127.0.0.1:{{ node_exporter_listen_address.split(':')[1] }}/metrics"
+    return_content: false
+    status_code: 200
+  retries: 5
+  delay: 2
+  register: node_exporter_probe
+  until: node_exporter_probe.status == 200
+
+- name: Show first few metric lines
+  shell: |
+    curl -s http://127.0.0.1:{{ node_exporter_listen_address.split(':')[1] }}/metrics | head -5
+  register: node_exporter_sample
+  changed_when: false
+
+- name: Display sample metrics
+  debug:
+    var: node_exporter_sample.stdout_lines

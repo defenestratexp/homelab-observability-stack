@@ -1,0 +1,14 @@
+---
+# Defaults for the prometheus_rules role.
+
+prometheus_rules_namespace: monitoring
+
+# Local k3s kubeconfig path on k3s-main.
+prometheus_rules_kubeconfig: /etc/rancher/k3s/k3s.yaml
+
+# Path on the controller (Ansible runner) to the directory of PrometheusRule
+# CRD yaml files. All *.yaml in this dir get applied.
+prometheus_rules_dir: "{{ playbook_dir }}/../files/prometheus-rules"
+
+# Where the rule files get staged on the target before kubectl apply.
+prometheus_rules_remote_dir: /tmp/prometheus-rules

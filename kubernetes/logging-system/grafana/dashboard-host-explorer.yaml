@@ -1,0 +1,725 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-host-explorer
+  namespace: logging-system
+  labels:
+    grafana_dashboard: "1"
+data:
+  host-explorer.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+          "id": 1,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum(count_over_time({source_type=\"syslog\"} | json | hostname=\"$host\" [$__range]))",
+              "instant": true,
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Total Logs",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum(count_over_time({source_type=\"syslog\"} | json | hostname=\"$host\", severity=\"warning\" [$__range]))",
+              "instant": true,
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Warnings",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "red", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum(count_over_time({source_type=\"syslog\"} | json | hostname=\"$host\", severity=\"err\" [$__range]))",
+              "instant": true,
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Errors",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "blue", "value": null}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum(count_over_time({source_type=\"syslog\"} | json | hostname=\"$host\", appname=\"sshd\" [$__range]))",
+              "instant": true,
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "SSH Events",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "purple", "value": null}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+          "id": 5,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum(count_over_time({source_type=\"syslog\"} | json | hostname=\"$host\", appname=\"sudo\" [$__range]))",
+              "instant": true,
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Sudo Commands",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "orange", "value": null}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+          "id": 6,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum(count_over_time({source_type=\"syslog\"} | json | hostname=\"$host\", appname=\"CRON\" [$__range]))",
+              "instant": true,
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Cron Jobs",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                }
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 4},
+          "id": 7,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "right",
+              "showLegend": true
+            },
+            "pieType": "pie",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "topk(10, sum by (appname) (count_over_time({source_type=\"syslog\"} | json | hostname=\"$host\" [$__range])))",
+              "instant": true,
+              "legendFormat": "{{appname}}",
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Top Applications",
+          "type": "piechart"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                }
+              },
+              "mappings": []
+            },
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "info"},
+                "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]
+              },
+              {
+                "matcher": {"id": "byName", "options": "notice"},
+                "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]
+              },
+              {
+                "matcher": {"id": "byName", "options": "warning"},
+                "properties": [{"id": "color", "value": {"fixedColor": "yellow", "mode": "fixed"}}]
+              },
+              {
+                "matcher": {"id": "byName", "options": "err"},
+                "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]
+              },
+              {
+                "matcher": {"id": "byName", "options": "crit"},
+                "properties": [{"id": "color", "value": {"fixedColor": "dark-red", "mode": "fixed"}}]
+              }
+            ]
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 4},
+          "id": 8,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "right",
+              "showLegend": true
+            },
+            "pieType": "pie",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum by (severity) (count_over_time({source_type=\"syslog\"} | json | hostname=\"$host\" [$__range]))",
+              "instant": true,
+              "legendFormat": "{{severity}}",
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Log Severity",
+          "type": "piechart"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                }
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 4},
+          "id": 9,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "right",
+              "showLegend": true
+            },
+            "pieType": "pie",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum by (facility) (count_over_time({source_type=\"syslog\"} | json | hostname=\"$host\" [$__range]))",
+              "instant": true,
+              "legendFormat": "{{facility}}",
+              "queryType": "instant",
+              "refId": "A"
+            }
+          ],
+          "title": "Log Facility",
+          "type": "piechart"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "bars",
+                "fillOpacity": 50,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "normal"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{"color": "green", "value": null}]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 6, "w": 24, "x": 0, "y": 12},
+          "id": 10,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "sum by (appname) (count_over_time({source_type=\"syslog\"} | json | hostname=\"$host\" [$__interval]))",
+              "legendFormat": "{{appname}}",
+              "queryType": "range",
+              "refId": "A"
+            }
+          ],
+          "title": "Log Volume by Application",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {"h": 6, "w": 12, "x": 0, "y": 18},
+          "id": 11,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "{source_type=\"syslog\"} |= \"\\\"hostname\\\":\\\"$host\\\"\" |= \"\\\"appname\\\":\\\"sshd\\\"\" | json | line_format \"[{{.severity}}] {{.message}}\"",
+              "queryType": "range",
+              "refId": "A"
+            }
+          ],
+          "title": "SSH Logs",
+          "type": "logs"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {"h": 6, "w": 12, "x": 12, "y": 18},
+          "id": 12,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "{source_type=\"syslog\"} |= \"\\\"hostname\\\":\\\"$host\\\"\" |= \"\\\"appname\\\":\\\"sudo\\\"\" | json | line_format \"{{.message}}\"",
+              "queryType": "range",
+              "refId": "A"
+            }
+          ],
+          "title": "Sudo Commands",
+          "type": "logs"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {"h": 6, "w": 24, "x": 0, "y": 24},
+          "id": 13,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "{source_type=\"syslog\"} |= \"\\\"hostname\\\":\\\"$host\\\"\" |~ \"\\\"severity\\\":\\\"(err|crit|alert|emerg)\\\"\" | json | line_format \"[{{.appname}}] {{.message}}\"",
+              "queryType": "range",
+              "refId": "A"
+            }
+          ],
+          "title": "Errors and Critical",
+          "type": "logs"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 30},
+          "id": 14,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "editorMode": "code",
+              "expr": "{source_type=\"syslog\"} |= \"\\\"hostname\\\":\\\"$host\\\"\" | json | line_format \"[{{.appname}}] {{.message}}\"",
+              "queryType": "range",
+              "refId": "A"
+            }
+          ],
+          "title": "All Logs",
+          "type": "logs"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "tags": ["hosts", "syslog", "infrastructure"],
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "selected": true,
+              "text": "k3s-main",
+              "value": "k3s-main"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "label": "Host",
+            "multi": false,
+            "name": "host",
+            "options": [
+              {"selected": false, "text": "media-worker", "value": "media-worker"},
+              {"selected": false, "text": "laptop", "value": "laptop"},
+              {"selected": false, "text": "nas", "value": "nas"},
+              {"selected": false, "text": "jenkins-node-1", "value": "jenkins-node-1"},
+              {"selected": false, "text": "jenkins-node-2", "value": "jenkins-node-2"},
+              {"selected": true, "text": "k3s-main", "value": "k3s-main"},
+              {"selected": false, "text": "remote-host", "value": "remote-host"},
+              {"selected": false, "text": "stream-host", "value": "stream-host"},
+              {"selected": false, "text": "console-host", "value": "console-host"},
+              {"selected": false, "text": "k3s-util", "value": "k3s-util"},
+              {"selected": false, "text": "workstation", "value": "workstation"},
+              {"selected": false, "text": "notes-host", "value": "notes-host"}
+            ],
+            "query": "media-worker,laptop,nas,jenkins-node-1,jenkins-node-2,k3s-main,remote-host,stream-host,console-host,k3s-util,workstation,notes-host",
+            "queryValue": "",
+            "skipUrlSync": false,
+            "type": "custom"
+          }
+        ]
+      },
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "",
+      "title": "Host Explorer",
+      "uid": "host-explorer",
+      "version": 1,
+      "weekStart": ""
+    }

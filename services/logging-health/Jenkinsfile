@@ -1,0 +1,163 @@
+@Library('homelab-jenkins-lib') _
+
+// Logging pipeline health check — runs every 5 minutes, sends a synthetic
+// syslog line and verifies it round-trips through Vector to Loki, then
+// confirms each expected host is forwarding. Failures publish to the
+// `monitoring` ntfy topic; we don't use notifyJenkinsBuild here because we
+// want the alert content to describe WHAT failed in the pipeline, not just
+// "Jenkins job is red".
+
+// Hysteresis: a single failing tick is usually a blip (executor contention,
+// Loki restart, a slow scrape) rather than a broken pipeline. On 2026-09-14 six
+// consecutive false "round-trip FAILED" pages were sent while check.sh actually
+// passed by hand — the failures came from executor starvation, not the pipeline.
+// Notify only when we cross from N-1 to N consecutive failures, matching the
+// pattern already used in applications/service-health/Jenkinsfile.
+def HYSTERESIS_N = 3
+
+// Walk currentBuild.previousBuild back, counting FAILURE/UNSTABLE runs until we
+// hit a SUCCESS or the start of history. Caller adds 1 for the current run.
+def countPriorFailureStreak() {
+    int streak = 0
+    def b = currentBuild.previousBuild
+    while (b != null && b.currentResult != 'SUCCESS') {
+        streak++
+        b = b.previousBuild
+    }
+    return streak
+}
+
+pipeline {
+    agent { label 'ops' }
+
+    triggers {
+        cron('H/5 * * * *')
+    }
+
+    options {
+        buildDiscarder(logRotator(daysToKeepStr: '3', numToKeepStr: '200'))
+        timeout(time: 2, unit: 'MINUTES')
+        // Cron ticks must never stack. Both stages run on `agent { label 'ops' }`,
+        // so without this each tick starts a pipeline and then blocks waiting for
+        // a heavyweight executor as a PlaceholderTask — and those do NOT coalesce
+        // in the queue. On 2026-09-14 a wedged homelab-updates-scheduled build held an
+        // executor for 32h and these two jobs stacked to 655 queued builds, which
+        // then drained as an ntfy flood. disableConcurrentBuilds() keeps at most
+        // one queued build per job, which Jenkins does coalesce.
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Run health checks') {
+            steps {
+                script {
+                    // Capture stdout (machine-readable key=value lines) AND
+                    // exit code; check.sh deliberately splits human detail to
+                    // stderr so the build log stays useful.
+                    def rc = sh(
+                        returnStatus: true,
+                        script: 'bash applications/logging-health/check.sh > /tmp/health.kv'
+                    )
+                    sh 'cat /tmp/health.kv'
+                    def kv = readFile('/tmp/health.kv')
+                        .split('\n')
+                        .findAll { it.contains('=') }
+                        .collectEntries { line -> def p = line.split('=', 2); [(p[0]): p[1]] }
+
+                    // Include this failing build in the streak count.
+                    int streak = countPriorFailureStreak() + 1
+                    boolean shouldNotify = (streak == HYSTERESIS_N)
+                    echo "logging-health: failure streak now ${streak} (N=${HYSTERESIS_N}, notify=${shouldNotify})"
+
+                    if (rc == 1) {
+                        if (shouldNotify) {
+                            notifyNtfy(
+                                topic: 'monitoring',
+                                title: 'Logging pipeline: synthetic round-trip FAILED',
+                                message: "Sent a marker via logger; not visible in Loki within the wait window. Vector or Loki may be down, or the path between is broken. Build: ${env.BUILD_URL}",
+                                tags: ['x', 'sos'],
+                                priority: 'high',
+                            )
+                        }
+                        error('Synthetic round-trip failed (see check.sh output above)')
+                    } else if (rc == 2) {
+                        def missing = kv['hosts_missing'] ?: '(unknown)'
+                        // Put the host names in the TITLE: on a phone the title is
+                        // often all that's visible, and "hosts not heartbeating"
+                        // alone doesn't say which host to go look at.
+                        def missingList = missing.trim().split(/\s+/).findAll { it }
+                        def seenList    = (kv['hosts_heartbeating'] ?: '').trim().split(/\s+/).findAll { it }
+                        def total       = missingList.size() + seenList.size()
+                        def label       = missingList ? missingList.join(', ') : '(unknown)'
+                        // Fall back to the old generic title if check.sh somehow
+                        // exited 2 without naming a host — better vague than wrong.
+                        def headline
+                        if (missingList.isEmpty()) {
+                            headline = 'Logging pipeline: hosts not heartbeating'
+                        } else if (missingList.size() == 1) {
+                            headline = "${label} not heartbeating"
+                        } else {
+                            headline = "${missingList.size()} hosts not heartbeating: ${label}"
+                        }
+                        if (shouldNotify) {
+                            notifyNtfy(
+                                topic: 'monitoring',
+                                title: (missingList && total) ? "${headline} (${seenList.size()}/${total} OK)" : headline,
+                                message: "Hosts missing the homelab-heartbeat in Loki over the last 5 min: ${missing}\nPossible causes: host down, network partition, rsyslog stopped, or /etc/cron.d/homelab-heartbeat removed/broken.\nBuild: ${env.BUILD_URL}",
+                                tags: ['warning', 'satellite_antenna'],
+                                priority: 'high',
+                            )
+                        }
+                        error("Hosts missing: ${missing}")
+                    } else if (rc == 3) {
+                        if (shouldNotify) {
+                            notifyNtfy(
+                                topic: 'monitoring',
+                                title: 'Logging pipeline: health check setup error',
+                                message: "check.sh exited 3 — Loki unreachable or a required tool (curl/jq/logger) missing on the agent. Build: ${env.BUILD_URL}",
+                                tags: ['question'],
+                                priority: 'default',
+                            )
+                        }
+                        error('Setup error')
+                    } else if (rc != 0) {
+                        // Defensive: any other non-zero is unexpected.
+                        if (shouldNotify) {
+                            notifyNtfy(
+                                topic: 'monitoring',
+                                title: 'Logging pipeline: unexpected exit code',
+                                message: "check.sh exited ${rc}. Build: ${env.BUILD_URL}",
+                                tags: ['warning'],
+                            )
+                        }
+                        error("Unexpected exit ${rc}")
+                    }
+                    // rc == 0: silent success — no notification, no noise.
+                }
+            }
+        }
+    }
+
+    post {
+        // Notify on red→green recovery so we know when the pipeline is healthy
+        // again after an incident. Continuous green stays silent.
+        always {
+            script {
+                def status = currentBuild.currentResult
+                def previous = currentBuild.previousBuild?.currentResult
+                // Symmetric with the failure path: if the outage was too short to
+                // page for, don't page for its recovery either.
+                int endedStreak = countPriorFailureStreak()
+                if (status == 'SUCCESS' && previous != null && previous != 'SUCCESS'
+                        && endedStreak >= HYSTERESIS_N) {
+                    notifyNtfy(
+                        topic: 'monitoring',
+                        title: 'Logging pipeline: recovered',
+                        message: "Health check is green again after ${endedStreak} consecutive failures. Build: ${env.BUILD_URL}",
+                        tags: ['white_check_mark', 'green_heart'],
+                    )
+                }
+            }
+        }
+    }
+}

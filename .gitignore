@@ -1,0 +1,8 @@
+ansible/inventory/hosts.yml
+ansible/inventory/group_vars/*.yml
+!ansible/inventory/group_vars/*.example.yml
+ansible/inventory/host_vars/*.yml
+!ansible/inventory/host_vars/*.example.yml
+ansible/vault_pass.txt
+ansible/become_pass.txt
+kubernetes/**/aws-credentials-secret.yaml

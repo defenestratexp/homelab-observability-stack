@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vector
+  namespace: logging-system
+  labels:
+    app: vector
+spec:
+  selector:
+    matchLabels:
+      app: vector
+  template:
+    metadata:
+      labels:
+        app: vector
+    spec:
+      serviceAccountName: vector
+      containers:
+        - name: vector
+          image: timberio/vector:0.34.1-alpine
+          args:
+            - --config-dir
+            - /etc/vector/
+          env:
+            - name: VECTOR_SELF_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: TZ
+              value: America/Los_Angeles
+          ports:
+            - containerPort: 514
+              name: syslog-udp
+              protocol: UDP
+            - containerPort: 8686
+              name: api
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector/
+              readOnly: true
+            - name: data
+              mountPath: /vector-data-dir
+            - name: var-log
+              mountPath: /var/log
+              readOnly: true
+            - name: var-lib-docker
+              mountPath: /var/lib/docker
+              readOnly: true
+            - name: procfs
+              mountPath: /host/proc
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: vector-config
+        - name: data
+          hostPath:
+            path: /var/lib/vector
+        - name: var-log
+          hostPath:
+            path: /var/log
+        - name: var-lib-docker
+          hostPath:
+            path: /var/lib/docker
+        - name: procfs
+          hostPath:
+            path: /proc
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists

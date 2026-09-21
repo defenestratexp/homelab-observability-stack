@@ -1,0 +1,161 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: host-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: host
+      interval: 30s
+      rules:
+        # Host went silent — node_exporter unreachable for 5 min. Generic; covers
+        # the laptop-style watchdog use case for every host with node_exporter.
+        - alert: HostDown
+          expr: up{job="node-exporter-lan"} == 0
+          for: 5m
+          labels:
+            topic: host
+            remediation: human
+            severity: warning
+            service: "Reachability"
+            # Mirror instance into `host` so alertmanager inhibit_rules can
+            # match this against EndpointDown, whose instance is a URL rather
+            # than a hostname. See probes.yaml metricRelabelings.
+            host: "{{$labels.instance}}"
+          annotations:
+            summary: "{{$labels.instance}} is not responding"
+            description: "node_exporter on {{$labels.instance}} has not been scrapeable for 5 minutes. The host is down, the network is partitioned, or node_exporter stopped. Services on this host are suppressed while this is firing."
+
+        # Disk hard floor — catches things filling fast that are already low.
+        - alert: DiskCritical
+          expr: |
+            (node_filesystem_avail_bytes{fstype=~"ext[234]|xfs|btrfs|zfs|f2fs|reiserfs"}
+             / node_filesystem_size_bytes{fstype=~"ext[234]|xfs|btrfs|zfs|f2fs|reiserfs"}) < 0.05
+            and node_filesystem_size_bytes{fstype=~"ext[234]|xfs|btrfs|zfs|f2fs|reiserfs"} > 5e9
+          for: 10m
+          labels:
+            topic: host
+            remediation: human
+            severity: critical
+            host: "{{$labels.instance}}"
+            service: "Disk space"
+          annotations:
+            summary: "{{$labels.instance}}: {{$labels.mountpoint}} is over 95% full"
+            description: "{{$labels.instance}} {{$labels.mountpoint}} has less than 5% of its capacity free for 10 minutes. Action: free space, expand the filesystem, or migrate data."
+
+        # Memory pressure — sustained low available memory.
+        - alert: HostMemoryPressure
+          expr: |
+            (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.10
+          for: 15m
+          labels:
+            topic: host
+            remediation: human
+            severity: warning
+            host: "{{$labels.instance}}"
+            service: "Memory"
+          annotations:
+            summary: "{{$labels.instance}}: less than 10% memory available"
+            description: "Available memory on {{$labels.instance}} is below 10% of total. OOM precursor."
+
+        # Active swap thrashing. The previous version measured swap_used /
+        # swap_total, which is a misleading signal on workstations with
+        # small swap: pages get pushed out during a brief memory crunch
+        # (e.g., HandBrake rip on media-worker) and never get reclaimed even
+        # when memory pressure is long gone. That's stale swap, not
+        # current pressure.
+        #
+        # The right signal is pages_swapped_IN — the kernel has to read
+        # FROM swap = real memory pressure right now. Combined with low
+        # available memory to filter out brief blips.
+        #
+        # Threshold: > 50 pages/sec swapped in over 5min (≈ 200 KB/s
+        # sustained) AND available memory < 15% of total. Either alone
+        # is fine; both together = real pressure worth paging on.
+        - alert: HostSwapping
+          expr: |
+            rate(node_vmstat_pswpin[5m]) > 50
+            and on (instance)
+            (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.15
+          for: 10m
+          labels:
+            topic: host
+            remediation: human
+            severity: warning
+            host: "{{$labels.instance}}"
+            service: "Swap"
+          annotations:
+            summary: "{{$labels.instance}}: actively swapping under memory pressure"
+            description: "{{$labels.instance}} is reading from swap at >50 pages/sec sustained over 5min while available memory is below 15%. Real memory pressure — investigate top consumers (`ps -eo pid,rss,comm --sort -rss | head -20`) and top swap consumers (`/proc/*/status` VmSwap field)."
+
+        # CPU sustained high.
+        - alert: HostCpuHigh
+          expr: |
+            100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+          for: 30m
+          labels:
+            topic: host
+            remediation: human
+            severity: warning
+            host: "{{$labels.instance}}"
+            service: "CPU"
+          annotations:
+            summary: "{{$labels.instance}}: CPU above 90% for 30 minutes"
+            description: "{{$labels.instance}} has had >90% CPU utilization for 30 minutes. Could be legitimate load (rip jobs, bulk encodes) or a runaway process."
+
+        # Filesystem read-only — a writable on-disk filesystem has gone RO.
+        # Snap RO mounts are filtered at the node_exporter layer.
+        - alert: FilesystemReadOnly
+          expr: |
+            node_filesystem_readonly{fstype=~"ext[234]|xfs|btrfs|zfs|f2fs|reiserfs"} == 1
+          for: 5m
+          labels:
+            topic: host
+            remediation: human
+            severity: critical
+            host: "{{$labels.instance}}"
+            service: "Filesystem"
+          annotations:
+            summary: "{{$labels.instance}}: {{$labels.mountpoint}} went read-only"
+            description: "Filesystem {{$labels.mountpoint}} on {{$labels.instance}} (fstype {{$labels.fstype}}) is mounted read-only. Disk error or remount as RO."
+
+        # NFS client stalling. Clients mount nas `hard`, so when the server
+        # stops answering, every process touching the mount blocks forever
+        # rather than erroring - and node_exporter's own filesystem collector
+        # can block too, which makes a healthy client look like HostDown.
+        # RPC retransmissions are the client-side symptom: a healthy mount sits
+        # at ~0/s, and a stalling server drives sustained retransmits.
+        - alert: NfsClientStalling
+          expr: |
+            rate(node_nfs_rpc_retransmissions_total[10m]) > 1
+          for: 15m
+          labels:
+            topic: host
+            remediation: human
+            severity: warning
+            host: "{{$labels.instance}}"
+            service: "NFS client"
+          annotations:
+            summary: "{{$labels.instance}}: NFS mounts are stalling"
+            description: "{{$labels.instance}} has been retransmitting NFS RPCs at over 1/sec for 15 minutes, which means the server is not answering promptly. Check nas first (the NFS server and RPC portmapper probes for nas will show if nfsd itself is down). Processes touching the mount will be blocked in uninterruptible sleep (state D) - list them with `ps -eo pid,stat,comm,wchan | grep -w D`."
+
+        # Inode exhaustion. A filesystem can be nowhere near full on bytes and
+        # still refuse writes once inodes run out - DiskCritical will not catch
+        # it. Most relevant on nas's media volumes, which hold large numbers
+        # of small sidecar files (nfo, srt, artwork).
+        - alert: FilesystemInodesLow
+          expr: |
+            (node_filesystem_files_free{fstype=~"ext[234]|xfs|btrfs"}
+             / node_filesystem_files{fstype=~"ext[234]|xfs|btrfs"}) < 0.05
+            and node_filesystem_files{fstype=~"ext[234]|xfs|btrfs"} > 0
+          for: 15m
+          labels:
+            topic: host
+            remediation: human
+            severity: critical
+            host: "{{$labels.instance}}"
+            service: "Inodes"
+          annotations:
+            summary: "{{$labels.instance}}: {{$labels.mountpoint}} is nearly out of inodes"
+            description: "{{$labels.instance}}:{{$labels.mountpoint}} has under 5% of its inodes free. Writes will start failing with ENOSPC even though `df -h` shows free space - check `df -i`. Usually a directory full of very small files."
+

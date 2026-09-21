@@ -1,0 +1,51 @@
+---
+# Defaults for the node_exporter role.
+
+node_exporter_version: "1.8.2"
+node_exporter_user: "node_exporter"
+node_exporter_group: "node_exporter"
+node_exporter_install_dir: "/usr/local/bin"
+node_exporter_listen_address: "0.0.0.0:9100"
+
+# Architecture: amd64 covers every homelab LAN host today.
+node_exporter_arch: "linux-amd64"
+
+node_exporter_archive: "node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}.tar.gz"
+node_exporter_download_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/{{ node_exporter_archive }}"
+
+# Mountpoint exclusion baseline applied to every monitored host. Drops
+# mountpoints node_exporter would otherwise emit but that we never want
+# to alert on:
+#   - /dev, /proc, /run, /sys              — pseudo-filesystems
+#   - /var/snap                            — snap content interfaces (always RO)
+#   - /var/lib/{docker,kubelet,containers} — container/orchestrator scratch
+# Hosts with additional excludes (e.g., nas's bind-mount duplicates
+# under /mnt/media/{toons,bjj,music}) override
+# node_exporter_mount_points_exclude_extra in their host_vars.
+node_exporter_mount_points_exclude_baseline: '^/(dev|proc|run|sys|var/snap|var/lib/(docker|kubelet|containers))($|/)'
+node_exporter_mount_points_exclude_extra: ''
+
+# Composed extra args. Per-host overrides go via the two _exclude_*
+# variables above so additions are additive (unioned via regex `|`)
+# rather than replacing the baseline.
+# Network filesystems are excluded from the filesystem collector on every
+# host. Clients mount nas `hard`, so when nas stalls, a stat() of the
+# mountpoint blocks forever - that hangs the node_exporter scrape and the host
+# is reported as HostDown even though it is perfectly healthy. Excluding the
+# fstype keeps a nas problem attributable to nas.
+#
+# Nothing is lost by this: nas exports these volumes and reports them itself
+# as local ext4 filesystems, so capacity is still monitored - just once, at the
+# source, instead of once per client.
+node_exporter_fs_types_exclude: '^(nfs|nfs4|cifs|smbfs|fuse\.sshfs|autofs)$'
+
+# Textfile collector directory. Lets any host publish extra metrics by
+# dropping a *.prom file here from a cron job - used for facts node_exporter
+# cannot collect itself (Jenkins controller health on k3s-util, and SMART
+# disk health on nas once smartmontools is installed).
+node_exporter_textfile_dir: '/var/lib/node_exporter/textfile_collector'
+
+node_exporter_extra_args: >-
+  --collector.filesystem.mount-points-exclude={{ node_exporter_mount_points_exclude_baseline }}{{ node_exporter_mount_points_exclude_extra }}
+  --collector.filesystem.fs-types-exclude={{ node_exporter_fs_types_exclude }}
+  --collector.textfile.directory={{ node_exporter_textfile_dir }}

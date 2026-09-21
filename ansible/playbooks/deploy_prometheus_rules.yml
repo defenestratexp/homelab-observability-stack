@@ -1,0 +1,9 @@
+---
+# Apply all PrometheusRule CRDs from files/prometheus-rules/ to the
+# monitoring namespace on k3s-main.
+
+- hosts: k3s-main
+  become: true
+  gather_facts: false
+  roles:
+    - prometheus_rules

@@ -1,0 +1,41 @@
+---
+# Install a per-minute syslog heartbeat on every monitored host so the
+# logging-pipeline-health check can detect liveness independent of how
+# chatty the host's normal workload happens to be.
+#
+# The original check.sh measured "any syslog activity in the last 5m" as a
+# proxy for "host is forwarding", which gave false-positive missing-host
+# alerts on low-activity boxes (notes-host/remote-host on MX Linux, pve2 on
+# Proxmox VE — all systems where /dev/log isn't constantly chatty). With a
+# deterministic 1/min heartbeat, the check can ask the question we actually
+# care about: "has this host phoned in recently?"
+#
+# Usage: Run via Jenkins with PLAYBOOK=playbooks/configure_log_heartbeat.yml
+# Target: local_servers group
+
+- name: Install homelab-heartbeat cron on monitored hosts
+  hosts: local_servers
+  become: true
+  tasks:
+    - name: Ensure cron is installed
+      ansible.builtin.package:
+        name: cron
+        state: present
+
+    - name: Drop /etc/cron.d/homelab-heartbeat
+      ansible.builtin.copy:
+        dest: /etc/cron.d/homelab-heartbeat
+        content: |
+          # homelab liveness heartbeat — one syslog line per minute so the
+          # logging-pipeline-health check can detect when a host stops
+          # forwarding independent of its organic message rate.
+          # Configured by ansible/playbooks/configure_log_heartbeat.yml.
+          PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          * * * * * root /usr/bin/logger -t homelab-heartbeat "alive"
+        mode: '0644'
+        owner: root
+        group: root
+
+    - name: Emit one heartbeat right now (don't wait for the first cron tick)
+      ansible.builtin.command: /usr/bin/logger -t homelab-heartbeat "alive (post-install)"
+      changed_when: false

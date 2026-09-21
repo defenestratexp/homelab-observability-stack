@@ -1,0 +1,40 @@
+---
+# Apply all PrometheusRule CRD yaml files from {{ prometheus_rules_dir }}
+# (controller-side) to the monitoring namespace on k3s-main.
+
+- name: Ensure remote staging dir exists
+  file:
+    path: "{{ prometheus_rules_remote_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Stage rule files on the target
+  copy:
+    src: "{{ prometheus_rules_dir }}/"
+    dest: "{{ prometheus_rules_remote_dir }}/"
+    mode: "0644"
+
+- name: Apply PrometheusRule CRDs
+  command: >
+    /usr/local/bin/k3s kubectl apply -f {{ prometheus_rules_remote_dir }}/
+  register: prometheus_rules_apply
+  changed_when: "'configured' in prometheus_rules_apply.stdout or 'created' in prometheus_rules_apply.stdout"
+
+- name: Display apply output
+  debug:
+    var: prometheus_rules_apply.stdout_lines
+
+- name: List all PrometheusRules in {{ prometheus_rules_namespace }}
+  command: >
+    /usr/local/bin/k3s kubectl -n {{ prometheus_rules_namespace }} get prometheusrules
+  register: prometheus_rules_list
+  changed_when: false
+
+- name: Display rules
+  debug:
+    var: prometheus_rules_list.stdout_lines
+
+- name: Clean up staged files
+  file:
+    path: "{{ prometheus_rules_remote_dir }}"
+    state: absent

@@ -1,0 +1,45 @@
+data_dir: {{ vector_data_dir }}
+
+# Host metrics collection
+sources:
+  host_metrics:
+    type: host_metrics
+    collectors:
+{% for collector in vector_collectors %}
+      - {{ collector }}
+{% endfor %}
+    scrape_interval_secs: {{ vector_scrape_interval }}
+
+# Convert metrics to logs using built-in transform
+transforms:
+  metrics_to_logs:
+    type: metric_to_log
+    inputs:
+      - host_metrics
+    host_tag: host
+    timezone: local
+
+  # Add hostname and format for Loki
+  format_for_loki:
+    type: remap
+    inputs:
+      - metrics_to_logs
+    source: |
+      .source_type = "host_metrics"
+      .hostname = "{{ inventory_hostname }}"
+
+# Send to Loki
+sinks:
+  loki_metrics:
+    type: loki
+    inputs:
+      - format_for_loki
+    endpoint: {{ vector_loki_endpoint }}
+    encoding:
+      codec: json
+    labels:
+      source_type: host_metrics
+      hostname: "{{ inventory_hostname }}"
+      job: vector_agent
+    healthcheck:
+      enabled: true

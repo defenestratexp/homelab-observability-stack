@@ -1,0 +1,13 @@
+---
+# Defaults for the blackbox_exporter role.
+
+blackbox_namespace: monitoring
+blackbox_release_name: blackbox
+blackbox_chart: prometheus-community/prometheus-blackbox-exporter
+blackbox_chart_version: ""    # empty = latest. pin once we know what works.
+
+blackbox_values_file: "{{ playbook_dir }}/../files/prometheus-blackbox-exporter-values.yaml"
+blackbox_remote_values_path: /tmp/prometheus-blackbox-exporter-values.yaml
+
+blackbox_kubeconfig: /etc/rancher/k3s/k3s.yaml
+blackbox_helm_timeout: "5m"

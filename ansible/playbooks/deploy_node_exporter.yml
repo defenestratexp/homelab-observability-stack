@@ -1,0 +1,10 @@
+---
+# Deploy prometheus node_exporter to monitored hosts.
+# Phase 1 starts with the `monitored_hosts` group containing nas only;
+# Phase 2 extends the group to the rest of the LAN.
+
+- hosts: monitored_hosts
+  become: true
+  gather_facts: true
+  roles:
+    - node_exporter

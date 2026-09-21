@@ -1,0 +1,11 @@
+---
+- name: restart vector
+  systemd:
+    name: vector
+    state: restarted
+    daemon_reload: yes
+  when: init_system == "systemd"
+
+- name: restart vector sysv
+  shell: /etc/init.d/vector restart
+  when: init_system == "sysv"

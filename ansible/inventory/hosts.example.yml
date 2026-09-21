@@ -1,0 +1,75 @@
+# Example inventory. Copy to inventory/hosts.yml (ansible.cfg points there)
+# and replace the placeholder addresses. Host names are functional roles, not
+# real machine names.
+#
+# Groups used by the playbooks in this repo:
+#   k3s-main            (host)  k3s control node; runs Prometheus, Alertmanager,
+#                               the ntfy bridge, blackbox-exporter and Loki.
+#                               deploy_prometheus_stack / _rules / _alertmanager_ntfy_bridge
+#                               / _blackbox_exporter target it directly.
+#   k3s-util            (host)  Jenkins controller + LAN CoreDNS + nginx reverse proxy;
+#                               deploy_jenkins_metrics targets it.
+#   monitored_hosts     (group) hosts that get a systemd node_exporter
+#                               (deploy_node_exporter). Keep in sync with
+#                               additionalScrapeConfigs in files/kube-prometheus-stack-values.yaml.
+#   vector_agent_hosts  (group) hosts that ship host metrics to Loki (vector_agent.yml).
+#   local_servers       (group) every LAN host that forwards syslog and emits the
+#                               heartbeat (configure_rsyslog_forwarding / configure_log_heartbeat).
+#                               Keep in sync with DEFAULT_EXPECTED in services/logging-health/check.sh.
+
+all:
+  vars:
+    ansible_user: deploy
+  hosts:
+    k3s-main:       { ansible_host: 192.0.2.68 }
+    k3s-util:       { ansible_host: 192.0.2.169 }
+    nas:            { ansible_host: 192.0.2.164 }
+    media-worker:   { ansible_host: 192.0.2.148 }
+    radio-host:     { ansible_host: 192.0.2.31 }
+    db-host:        { ansible_host: 192.0.2.57 }
+    laptop:         { ansible_host: 192.0.2.231 }
+    stream-host:    { ansible_host: 192.0.2.40 }
+    spare-host:     { ansible_host: 192.0.2.41 }
+    pve2:           { ansible_host: 192.0.2.42 }
+    jenkins-node-1: { ansible_host: 192.0.2.51 }
+    jenkins-node-2: { ansible_host: 192.0.2.52 }
+    edge:           { ansible_host: 198.51.100.18 }
+    workstation:    { ansible_host: 198.51.100.14 }
+
+  children:
+    monitored_hosts:
+      hosts:
+        nas:
+        k3s-util:
+        media-worker:
+        radio-host:
+        db-host:
+        edge:
+        laptop:
+        workstation:
+
+    vector_agent_hosts:
+      hosts:
+        media-worker:
+        laptop:
+        nas:
+        k3s-main:
+        k3s-util:
+        workstation:
+
+    local_servers:
+      hosts:
+        workstation:
+        k3s-main:
+        spare-host:
+        media-worker:
+        nas:
+        k3s-util:
+        stream-host:
+        laptop:
+        edge:
+        db-host:
+        radio-host:
+        pve2:
+        jenkins-node-1:
+        jenkins-node-2:

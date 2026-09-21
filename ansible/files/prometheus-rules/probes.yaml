@@ -1,0 +1,218 @@
+# Probe CRDs scraped by Prometheus (via the prometheus-operator), each
+# delegating to the blackbox-exporter service in the same namespace.
+# The Operator turns these into scrape configs that hit the blackbox
+# pod with the target URL as a parameter and ingest probe_success +
+# friends as metrics.
+#
+# job names land on the resulting metrics — used by the EndpointDown
+# alert and per-class Grafana dashboards.
+
+# Public-facing endpoints (Cloudflare tunnel-fronted, real LE certs).
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-public
+  namespace: monitoring
+spec:
+  jobName: blackbox-public
+  prober:
+    url: blackbox-exporter.monitoring:9115
+  module: http_2xx
+  interval: 60s
+  scrapeTimeout: 15s
+  targets:
+    staticConfig:
+      static:
+        - https://radio.example.com/status-json.xsl
+        - https://ntfy.example.com/v1/health
+        - https://terminal.example.com/
+        - https://code.example.com/
+        - https://remote.example.com/
+      labels:
+        endpoint_class: public
+  metricRelabelings:
+    # Declare which HOST serves each endpoint so HostDown can inhibit
+    # EndpointDown for the same box (see alertmanager inhibit_rules).
+    # Derived from the reverse proxy's upstream targets — the
+    # DNS name does NOT reliably imply the host, so this is explicit.
+    - sourceLabels: [instance]
+      regex: 'https://radio\.example\.com.*'
+      targetLabel: host
+      replacement: radio-host
+    - sourceLabels: [instance]
+      regex: 'https://ntfy\.example\.com.*'
+      targetLabel: host
+      replacement: ntfy
+    - sourceLabels: [instance]
+      regex: 'https://(terminal|code)\.example\.com.*'
+      targetLabel: host
+      replacement: workstation
+    - sourceLabels: [instance]
+      regex: 'https://remote\.example\.com.*'
+      targetLabel: host
+      replacement: k3s-util
+    # Human service name, so an alert says WHAT was unreachable rather
+    # than just a URL or the proxy's address. Public (tunnel-fronted) endpoints.
+    - sourceLabels: [instance]
+      regex: 'https://radio\.example\.com.*'
+      targetLabel: service
+      replacement: Internet Radio
+    - sourceLabels: [instance]
+      regex: 'https://ntfy\.example\.com.*'
+      targetLabel: service
+      replacement: ntfy
+    - sourceLabels: [instance]
+      regex: 'https://terminal\.example\.com.*'
+      targetLabel: service
+      replacement: Butterfly Terminal
+    - sourceLabels: [instance]
+      regex: 'https://code\.example\.com.*'
+      targetLabel: service
+      replacement: Code Server
+    - sourceLabels: [instance]
+      regex: 'https://remote\.example\.com.*'
+      targetLabel: service
+      replacement: Guacamole
+---
+# Internal-LAN HTTPS endpoints (*.home.example.com via nginx-proxy
+# on k3s-util + LE wildcard cert).
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-internal
+  namespace: monitoring
+spec:
+  jobName: blackbox-internal
+  prober:
+    url: blackbox-exporter.monitoring:9115
+  module: http_2xx
+  interval: 60s
+  scrapeTimeout: 15s
+  targets:
+    staticConfig:
+      static:
+        - https://terminal.home.example.com/
+        - https://code.home.example.com/
+        - https://logs.home.example.com/
+        - https://jenkins.home.example.com/login
+        - https://remote.home.example.com/guacamole/
+        - https://charts.home.example.com/
+        - https://gallery.home.example.com/
+        - https://draw.home.example.com/
+        - https://excalidraw.home.example.com/
+        - https://penpot.home.example.com/
+        - https://audit.home.example.com/
+      labels:
+        endpoint_class: internal
+  metricRelabelings:
+    - sourceLabels: [instance]
+      regex: 'https://(terminal|code)\.home\.example\.com.*'
+      targetLabel: host
+      replacement: workstation
+    - sourceLabels: [instance]
+      regex: 'https://jenkins\.home\.example\.com.*'
+      targetLabel: host
+      replacement: k3s-util
+    - sourceLabels: [instance]
+      regex: 'https://remote\.home\.example\.com.*'
+      targetLabel: host
+      replacement: k3s-util
+    - sourceLabels: [instance]
+      regex: 'https://(logs|charts|gallery|draw|excalidraw|penpot|audit)\.home\.example\.com.*'
+      targetLabel: host
+      replacement: k3s-main
+    # Human service name, so an alert says WHAT was unreachable rather
+    # than just a URL or the proxy's address. Internal endpoints behind nginx-proxy on k3s-util.
+    - sourceLabels: [instance]
+      regex: 'https://terminal\.home\.example\.com.*'
+      targetLabel: service
+      replacement: Butterfly Terminal
+    - sourceLabels: [instance]
+      regex: 'https://code\.home\.example\.com.*'
+      targetLabel: service
+      replacement: Code Server
+    - sourceLabels: [instance]
+      regex: 'https://logs\.home\.example\.com.*'
+      targetLabel: service
+      replacement: Grafana
+    - sourceLabels: [instance]
+      regex: 'https://jenkins\.home\.example\.com.*'
+      targetLabel: service
+      replacement: Jenkins
+    - sourceLabels: [instance]
+      regex: 'https://remote\.home\.example\.com.*'
+      targetLabel: service
+      replacement: Guacamole
+    - sourceLabels: [instance]
+      regex: 'https://charts\.home\.example\.com.*'
+      targetLabel: service
+      replacement: Kroki Diagrams
+    - sourceLabels: [instance]
+      regex: 'https://gallery\.home\.example\.com.*'
+      targetLabel: service
+      replacement: Pigallery2
+    - sourceLabels: [instance]
+      regex: 'https://draw\.home\.example\.com.*'
+      targetLabel: service
+      replacement: Draw.io
+    - sourceLabels: [instance]
+      regex: 'https://excalidraw\.home\.example\.com.*'
+      targetLabel: service
+      replacement: Excalidraw
+    - sourceLabels: [instance]
+      regex: 'https://penpot\.home\.example\.com.*'
+      targetLabel: service
+      replacement: Penpot
+    - sourceLabels: [instance]
+      regex: 'https://audit\.home\.example\.com.*'
+      targetLabel: service
+      replacement: Package Audit
+---
+# Raw TCP probes (no HTTP layer). Postgres on db-host is the only
+# Phase 2b target; more can be added as we onboard new app DBs.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-tcp
+  namespace: monitoring
+spec:
+  jobName: blackbox-tcp
+  prober:
+    url: blackbox-exporter.monitoring:9115
+  module: tcp_connect
+  interval: 60s
+  scrapeTimeout: 10s
+  targets:
+    staticConfig:
+      static:
+        - 192.0.2.57:5432    # db-host Postgres
+        # nas NFS. A stalled nfsd leaves the box pingable and SSH-able while
+        # every export hangs, so host-level checks stay green - these catch it.
+        # Clients mount `hard`, so a stall blocks any process touching a mount.
+        - 192.0.2.164:2049   # nas nfsd
+        - 192.0.2.164:111    # nas rpcbind (mount negotiation)
+      labels:
+        endpoint_class: tcp
+  metricRelabelings:
+    - sourceLabels: [instance]
+      regex: '192\.0\.2\.57:.*'
+      targetLabel: host
+      replacement: db-host
+    - sourceLabels: [instance]
+      regex: '192\.0\.2\.164:.*'
+      targetLabel: host
+      replacement: nas
+    # Human service name, so an alert says WHAT was unreachable rather
+    # than just a URL or the proxy's address. Raw TCP services.
+    - sourceLabels: [instance]
+      regex: '192\.0\.2\.57:5432'
+      targetLabel: service
+      replacement: PostgreSQL
+    - sourceLabels: [instance]
+      regex: '192\.0\.2\.164:2049'
+      targetLabel: service
+      replacement: NFS server
+    - sourceLabels: [instance]
+      regex: '192\.0\.2\.164:111'
+      targetLabel: service
+      replacement: RPC portmapper

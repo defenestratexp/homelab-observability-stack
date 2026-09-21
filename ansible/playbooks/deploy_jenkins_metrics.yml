@@ -1,0 +1,89 @@
+---
+# Publish Jenkins controller health as node_exporter textfile metrics on the
+# controller host, so agent/queue health is visible to Prometheus even when
+# every Jenkins agent is offline.
+#
+# Background: the two existing Jenkins health checks both run ON an agent, and
+# the only external check asserts that /login returns 200 — which the
+# controller does happily while the entire build pipeline is dead. On
+# 2026-09-14 both agents were offline with 655 builds queued and every monitor
+# stayed green.
+#
+# Requires the node_exporter textfile collector, which is enabled fleet-wide by
+# roles/node_exporter (--collector.textfile.directory).
+- name: Publish Jenkins controller metrics for Prometheus
+  hosts: k3s-util
+  become: true
+  vars:
+    jenkins_metrics_script: /usr/local/bin/homelab-jenkins-metrics.sh
+    jenkins_metrics_env: /etc/homelab/jenkins-api.env
+    jenkins_textfile_dir: /var/lib/node_exporter/textfile_collector
+
+  tasks:
+    - name: Fetch Jenkins API credentials from AWS Secrets Manager
+      set_fact:
+        jenkins_api_creds: "{{ lookup('amazon.aws.aws_secret', 'homelab/jenkins/api-token', region='us-west-2') | from_json }}"
+      no_log: true
+
+    - name: Ensure required tools are present
+      package:
+        name:
+          - curl
+          - jq
+        state: present
+
+    - name: Ensure config directory exists
+      file:
+        path: /etc/homelab
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Ensure textfile collector directory exists
+      file:
+        path: "{{ jenkins_textfile_dir }}"
+        state: directory
+        owner: root
+        group: node_exporter
+        mode: "0775"
+
+    - name: Install Jenkins API credentials
+      copy:
+        dest: "{{ jenkins_metrics_env }}"
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          JENKINS_URL={{ jenkins_api_creds.url | default('http://localhost:8080') }}
+          JENKINS_USER={{ jenkins_api_creds.user | default('deploy') }}
+          JENKINS_TOKEN={{ jenkins_api_creds.token }}
+      no_log: true
+
+    - name: Install metrics collection script
+      copy:
+        src: ../files/homelab-jenkins-metrics.sh
+        dest: "{{ jenkins_metrics_script }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Schedule metrics collection every minute
+      cron:
+        name: homelab-jenkins-metrics
+        job: "{{ jenkins_metrics_script }} >/dev/null 2>&1"
+        user: root
+        minute: "*"
+
+    - name: Run once now so metrics exist immediately
+      command: "{{ jenkins_metrics_script }}"
+      changed_when: false
+
+    - name: Read back the generated metrics
+      command: "cat {{ jenkins_textfile_dir }}/homelab_jenkins.prom"
+      register: jenkins_metrics_out
+      changed_when: false
+
+    - name: Show published metrics
+      debug:
+        msg: "{{ jenkins_metrics_out.stdout_lines | reject('match', '^#') | list }}"

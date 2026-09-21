@@ -1,0 +1,23 @@
+---
+# Defaults for the prometheus_stack role.
+
+prometheus_stack_namespace: monitoring
+prometheus_stack_release_name: kps
+prometheus_stack_chart: prometheus-community/kube-prometheus-stack
+prometheus_stack_chart_version: ""    # empty = latest. pin once we know what works.
+prometheus_stack_helm_repo_name: prometheus-community
+prometheus_stack_helm_repo_url: https://prometheus-community.github.io/helm-charts
+
+# Path on the controller (Ansible runner) to the helm values file. Override via -e.
+# Lives in ansible/files/ next to the playbooks so the Jenkins job can find it
+# with a single checkout.
+prometheus_stack_values_file: "{{ playbook_dir }}/../files/kube-prometheus-stack-values.yaml"
+
+# Path on the target host where Ansible will stage the values file before invoking helm.
+prometheus_stack_remote_values_path: /tmp/kube-prometheus-stack-values.yaml
+
+# Local k3s kubeconfig path on k3s-main.
+prometheus_stack_kubeconfig: /etc/rancher/k3s/k3s.yaml
+
+# How long to wait for helm install/upgrade to settle.
+prometheus_stack_helm_timeout: "10m"

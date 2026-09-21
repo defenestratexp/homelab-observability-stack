@@ -1,0 +1,131 @@
+# Service inventory for the service-health checker.
+#
+# Each service has a `check_type` that determines how it's tested. Currently
+# supported types:
+#   - http_get        — issue a GET, assert the response status is in
+#                       `expected_status` (int or list of ints).
+#   - stream_bytes    — open the URL and read for `duration` seconds, assert
+#                       the byte rate is at least `min_bps`. Used for icecast.
+#   - tcp_connect     — open a TCP connection to host:port, assert it succeeds.
+#   - dns_resolve     — query `server` for `name`, assert the response equals
+#                       `expected_ip`.
+#
+# Each service is also tagged with a `category` so we can later subset / report
+# coverage by tier. Current categories:
+#   - public-tunnel       — reachable from the internet via Cloudflare
+#   - critical-internal   — on the LAN; if these break, large parts of the
+#                           rest of the infra get harder to debug or alert on
+#   - service-internal    — useful internal services; non-critical
+#   - infra               — backing infrastructure (DBs, message queues, etc.)
+#
+# When adding a service: copy an existing entry and adjust. Keep the inventory
+# sorted by category, then alphabetical within category for easier diff review.
+
+services:
+
+  # ----- public-tunnel: reachable from the internet via Cloudflare -----
+
+  - name: ntfy.example.com (ntfy)
+    category: public-tunnel
+    check_type: http_get
+    url: https://ntfy.example.com/v1/health
+    expected_status: 200
+    timeout: 10
+
+  - name: code.example.com (code-server)
+    category: public-tunnel
+    check_type: http_get
+    url: https://code.example.com/login
+    expected_status: 200
+    timeout: 10
+
+  - name: radio.example.com (icecast stream)
+    category: public-tunnel
+    # Was stream_bytes (read /stream for 5s, assert >=5000 B/s) — it flapped
+    # because bps = bytes / time_total divides by connect+TLS time too, so a
+    # loaded Jenkins agent (slow connect) read 0 bytes in the window and
+    # false-failed. icecast_mount GETs the status page and asserts a live source
+    # on /stream: reliable (no throughput timing) and a stronger signal.
+    check_type: icecast_mount
+    url: https://radio.example.com/status-json.xsl
+    mount: /stream
+    timeout: 10
+
+  - name: remote.example.com (Guacamole)
+    category: public-tunnel
+    check_type: http_get
+    url: https://remote.example.com/guacamole/
+    expected_status: [200, 302]
+    timeout: 10
+
+  - name: terminal.example.com (Butterfly)
+    category: public-tunnel
+    # Cloudflare Access wraps this hostname; an unauthenticated GET either
+    # 302s to the login URL or 200s with the login HTML inline depending on
+    # which path Access takes that day. Either is "the tunnel is reaching
+    # the backend"; failure means tunnel or Access misconfiguration.
+    check_type: http_get
+    url: https://terminal.example.com/
+    expected_status: [200, 302]
+    timeout: 10
+
+  # ----- critical-internal: linchpin services -----
+
+  - name: CoreDNS (k3s-util)
+    category: critical-internal
+    check_type: dns_resolve
+    server: 192.0.2.169
+    qname: k3s-util.example.internal
+    expected_ip: 192.0.2.169
+    timeout: 5
+
+  - name: Grafana (k3s-main)
+    category: critical-internal
+    check_type: http_get
+    url: http://192.0.2.68:30085/api/health
+    expected_status: 200
+    timeout: 10
+
+  - name: Jenkins (k3s-util)
+    category: critical-internal
+    check_type: http_get
+    url: http://k3s-util.example.internal:8080/login
+    expected_status: 200
+    timeout: 10
+
+  - name: Loki (k3s-main)
+    category: critical-internal
+    check_type: http_get
+    url: http://192.0.2.68:31100/ready
+    expected_status: 200
+    timeout: 10
+
+  - name: nginx-proxy (k3s-util)
+    category: critical-internal
+    # An unconfigured Host returns the default-server 404, which means nginx
+    # is alive and listening. We don't care about content, just that it
+    # responds.
+    check_type: tcp_connect
+    host: 192.0.2.169
+    port: 80
+    timeout: 5
+
+  - name: postgres (db-host)
+    category: critical-internal
+    # Postgres on db-host serves the databases for the
+    # radio playlist generator. TCP-only check for now; adding a query
+    # check would require credentials in the runner, deferred until needed.
+    check_type: tcp_connect
+    host: 192.0.2.57
+    port: 5432
+    timeout: 5
+
+  - name: tunnel cloudflared (edge.example.internal)
+    category: critical-internal
+    # cloudflared doesn't expose an HTTP healthcheck on the host by default,
+    # but we can verify the tunnel host is reachable via SSH. If it's down
+    # all *.example.com hostnames break.
+    check_type: tcp_connect
+    host: 198.51.100.18
+    port: 22
+    timeout: 5

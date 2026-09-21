@@ -1,0 +1,333 @@
+# Helm values for kube-prometheus-stack on k3s-main.
+# Phase 1 of the homelab monitoring deployment.
+#
+# Scope of this file:
+#   - Brings up the stack (Prometheus, Alertmanager, node-exporter, kube-state-metrics, Operator).
+#   - Disables the bundled Grafana — existing Grafana stays in place and is added as a data source.
+#   - Sets retention, storage, resource limits sized for homelab.
+#   - Relaxes selector defaults so Prometheus picks up ServiceMonitor / PodMonitor / PrometheusRule
+#     resources from any namespace with the right labels (standard recommended config).
+#
+# Future phases extend this via additional CRDs landed in the same dir
+# (PrometheusRule, Probe, AlertmanagerConfig, ServiceMonitor).
+
+fullnameOverride: kps
+
+# NOTE on bundled rule topic labels:
+# We previously set defaultRules.additionalRuleLabels.topic=cluster to route
+# all chart alerts to the `cluster` ntfy topic. That breaks recording rules
+# (vector contains metrics with the same labelset after applying rule labels)
+# because the chart's recording rules generate series whose existing labels
+# collide once a constant label is forced on. Until we can target alert rules
+# separately from recording rules in this chart version, bundled alerts fall
+# through to the default `monitoring` topic via the bridge's gval expression.
+
+# Disable the bundled Grafana — keep the existing one and point it at this Prometheus.
+grafana:
+  enabled: false
+
+# Operator — required for the CRDs (PrometheusRule, ServiceMonitor, Probe, AlertmanagerConfig).
+prometheusOperator:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 100Mi
+    limits:
+      memory: 200Mi
+  admissionWebhooks:
+    enabled: true
+    patch:
+      enabled: true
+
+# DaemonSet — covers k3s-main nodes (single-node cluster today). Other LAN hosts
+# get their own systemd-managed node_exporter via the node_exporter role in ansible/roles/.
+nodeExporter:
+  enabled: true
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 30Mi
+    limits:
+      memory: 60Mi
+  # Mirror the same mount-points-exclude regex our role-managed
+  # node_exporters use (see roles/node_exporter/defaults/main.yml). Drops
+  # /var/snap/* (snap RO bind mounts), pseudo-filesystems, and orchestrator
+  # scratch dirs that would otherwise generate false positives in the
+  # disk/RO alert rules. Keep in sync with the role default.
+  extraArgs:
+    - --collector.filesystem.mount-points-exclude=^/(dev|proc|run|sys|var/snap|var/lib/(docker|kubelet|containers))($|/)
+
+# kube-state-metrics — k8s objects → Prometheus metrics (pods, deployments, etc.).
+kubeStateMetrics:
+  enabled: true
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 30m
+      memory: 50Mi
+    limits:
+      memory: 150Mi
+
+# k3s-specific: these components run as static pods or are managed differently in k3s
+# vs upstream k8s. Disable scraping their controller/scheduler/etcd metrics — we'd
+# only get errors. The kubelet, kube-state-metrics, and node-exporter still cover
+# everything that matters for cluster visibility.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+# Prometheus server itself — retention, storage, resources, selector relaxation.
+prometheus:
+  enabled: true
+  prometheusSpec:
+    retention: 30d
+    retentionSize: 8GB
+
+    # Pick up any ServiceMonitor/PodMonitor/PrometheusRule in any namespace that the
+    # operator can see, regardless of helm release label. This is the recommended
+    # config for homelab-scale clusters where you want one Prometheus picking up
+    # everything.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 1Gi
+      limits:
+        memory: 3Gi
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 10Gi
+
+    # Inject `topic: monitoring` on every alert that doesn't already have a
+    # topic label. This sidesteps a gval limitation in alertmanager-ntfy
+    # where the bridge can't gracefully default a missing label key — the
+    # access expression `labels.topic` throws "unknown parameter" rather than
+    # returning empty string. By guaranteeing the label exists at the
+    # alerting layer, the bridge's gval can be a plain `labels.topic` lookup
+    # with no fallback needed. Alerts that DO set their own topic label
+    # (host/synthetic/cluster/radio) keep their value because the
+    # source_labels match only fires on empty (missing).
+    additionalAlertRelabelConfigs:
+      # Layered topic injection. Order matters — Prometheus applies these
+      # in sequence, and each rule's regex must match for the replacement
+      # to fire.
+      #
+      # Rule 1: chart-bundled alerts (Kube*, Node*, Etcd*, etc.) get
+      # routed to the `cluster` ntfy topic — but ONLY if they don't
+      # already carry a topic label. The trick is to concat alertname
+      # and current topic with `;` and require the regex match to end at
+      # the separator (i.e., empty topic). Alerts that set their own
+      # topic (custom PrometheusRules with topic=host/synthetic/etc.)
+      # have a non-empty value after the `;` and won't match.
+      - source_labels: [alertname, topic]
+        separator: ";"
+        regex: "(Kube|Node|Etcd|TargetDown|Watchdog|CPUThrottling|Prometheus|AlertManager).*;"
+        target_label: topic
+        replacement: cluster
+      # Rule 2: any remaining alert without a topic falls back to the
+      # monitoring topic (the catch-all).
+      - source_labels: [topic]
+        regex: ""
+        target_label: topic
+        replacement: monitoring
+      # Rule 3: severity fallback. Bundled alerts always have severity,
+      # but custom rules occasionally forget. Default to warning.
+      - source_labels: [severity]
+        regex: ""
+        target_label: severity
+        replacement: warning
+
+      # ---- Nagios-style identity: every alert must name a HOST and a SERVICE.
+      #
+      # Rule 4: the in-cluster node-exporter DaemonSet scrapes k3s-main a SECOND
+      # time as instance=192.0.2.68:9100, so cluster alerts arrived naming a bare
+      # IP while the LAN job named the host. Map cluster node IPs to hostnames.
+      - source_labels: [instance]
+        regex: "192\\.0\\.2\\.68(:.*)?"
+        target_label: host
+        replacement: k3s-main
+      # Rule 5: host fallback. Any alert still lacking `host` inherits
+      # `instance` — for job=node-exporter-lan that is already a hostname
+      # (see additionalScrapeConfigs below, which sets instance: nas etc).
+      - source_labels: [host, instance]
+        separator: ";"
+        regex: ";(.+)"
+        target_label: host
+        replacement: "$1"
+      # Rule 6: the chart's ServiceMonitor scrapes inject a k8s `service` label
+      # (e.g. "kps-prometheus-node-exporter"). That collides with our human
+      # service name from probes.yaml/host.yaml, so blank the k8s one — an
+      # empty label is not stored, and the bridge then falls back to alertname.
+      - source_labels: [service]
+        regex: "kps-.*"
+        target_label: service
+        replacement: ""
+      # Rule 7: drop plumbing labels. alertmanager-ntfy turns EVERY remaining
+      # label into an ntfy tag, so these rendered as a wall of
+      # "prometheus = monitoring/kps-prometheus, namespace = monitoring, ..."
+      # on the phone and buried the actual title. NOTE: `job` is deliberately
+      # NOT dropped - the TargetDown null route matches on it.
+      - regex: "(prometheus|prometheus_replica|namespace|endpoint|container|pod|endpoint_class|remediation)"
+        action: labeldrop
+
+    # Static-target scrapes for LAN hosts running node_exporter as a systemd
+    # service (the hosts that don't live in k8s). The in-cluster node_exporter
+    # DaemonSet is picked up automatically by the chart's bundled ServiceMonitor.
+    #
+    # Targets are addressed by IP because the cluster's CoreDNS doesn't forward
+    # to k3s-util's LAN CoreDNS — proper DNS forwarding is a Phase 2+ concern.
+    # Each target gets an explicit `instance` label so PromQL/dashboards/alerts
+    # continue to use friendly hostnames.
+    #
+    # New hosts get added by:
+    #   1) appending to monitored_hosts in ansible/inventory/hosts.yml
+    #   2) appending a target+labels stanza below
+    # Both updates land in the same commit.
+    additionalScrapeConfigs:
+      - job_name: node-exporter-lan
+        static_configs:
+          - targets: ['192.0.2.164:9100']
+            labels:
+              instance: nas
+              host_class: nas
+          - targets: ['192.0.2.169:9100']
+            labels:
+              instance: k3s-util
+              host_class: services      # Jenkins master, CoreDNS, k3s utility cluster
+          - targets: ['192.0.2.148:9100']
+            labels:
+              instance: media-worker
+              host_class: workstation   # media transcoding host
+          - targets: ['192.0.2.31:9100']
+            labels:
+              instance: radio-host
+              host_class: media         # Liquidsoap + Icecast
+          - targets: ['192.0.2.57:9100']
+            labels:
+              instance: db-host
+              host_class: services      # Postgres host
+          - targets: ['198.51.100.18:9100']
+            labels:
+              instance: edge
+              host_class: services      # Cloudflare tunnel host
+          - targets: ['192.0.2.231:9100']
+            labels:
+              instance: laptop
+              host_class: workstation   # Battery-powered, episodic flapping
+          - targets: ['198.51.100.14:9100']
+            labels:
+              instance: workstation
+              host_class: workstation   # admin workstation
+
+# Alertmanager — wired up properly in Phase 1 step 8 once the bridge is deployed.
+# For now, minimal config so the pod runs and accepts alerts (will be replaced by
+# AlertmanagerConfig CRD landing alongside the bridge).
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 20m
+        memory: 50Mi
+      limits:
+        memory: 200Mi
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 1Gi
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ['alertname', 'instance']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      receiver: ntfy
+      # Watchdog is a Prometheus heartbeat alert that fires constantly when
+      # things are healthy — silence it explicitly so our phone isn't pinged
+      # every group_interval.
+      routes:
+        - matchers:
+            - alertname = "Watchdog"
+          receiver: 'null'
+        # InfoInhibitor exists only to SUPPRESS other info-level alerts — it is
+        # plumbing, severity=none, and never meant to reach a phone. It flaps
+        # constantly: 44 firing + 29 resolved notifications in 24h, 89% of all
+        # traffic on the monitoring topic, drowning the alerts that matter.
+        - matchers:
+            - alertname = "InfoInhibitor"
+          receiver: 'null'
+        # TargetDown aggregates by (cluster, job, namespace, service) and so
+        # carries NO instance label — when a LAN box dies it fires "one or
+        # more targets are unreachable" with no host name, purely duplicating
+        # HostDown which does name the host. Drop it for that job only; every
+        # other job (k8s components, etc.) still alerts normally.
+        - matchers:
+            - alertname = "TargetDown"
+            - job = "node-exporter-lan"
+          receiver: 'null'
+      # Per-class routes can be added later once we have multiple alert
+      # classes; for Phase 1 every other alert hits the same bridge endpoint,
+      # and the bridge reads the alert's `topic` label to route per-topic on
+      # the ntfy side. See alertmanager_ntfy_bridge role.
+    # If a whole host is down, its endpoints are down as a CONSEQUENCE —
+    # don't send a second notification saying so. Requires both alerts to
+    # carry a matching `host` label: HostDown mirrors it from instance,
+    # blackbox probes get it via metricRelabelings in probes.yaml.
+    inhibit_rules:
+      # If a whole host is down, EVERYTHING on it is down as a consequence.
+      # Send one "host is down" notification, not a dozen for its disk,
+      # memory, endpoints and systemd units. Every alert now carries a `host`
+      # label (set by the rules themselves or by alert_relabel_configs rules
+      # 4-5 above), so this matches broadly. HostDown is excluded from the
+      # targets so it can never inhibit itself.
+      - source_matchers:
+          - alertname = "HostDown"
+        target_matchers:
+          - alertname != "HostDown"
+        equal: ['host']
+      # A down endpoint is trivially also a slow endpoint - audit.home fired
+      # both at the same second, every time. Keep the actionable one.
+      - source_matchers:
+          - alertname = "EndpointDown"
+        target_matchers:
+          - alertname = "EndpointSlow"
+        equal: ['instance']
+      # Same condition at two severities: page once, at the worse one.
+      - source_matchers:
+          - severity = "critical"
+        target_matchers:
+          - severity = "warning"
+        equal: ['host', 'service']
+    receivers:
+      - name: ntfy
+        webhook_configs:
+          - url: http://alertmanager-ntfy.monitoring.svc.cluster.local:8000/hook
+            send_resolved: true
+      # No-op receiver. Used for Watchdog and other heartbeat-style alerts
+      # that we want Alertmanager to receive but never forward to ntfy.
+      - name: 'null'

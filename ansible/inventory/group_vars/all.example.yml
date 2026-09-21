@@ -1,0 +1,27 @@
+# Example group_vars. Copy to group_vars/all.yml (or split per group) and
+# override only what differs from the role defaults. Every variable below
+# exists in a role's defaults/main.yml; the values shown are those defaults
+# unless noted.
+
+# --- alertmanager_ntfy_bridge ---
+bridge_ntfy_baseurl: https://ntfy.example.com
+# AWS Secrets Manager id holding the ntfy bearer token (looked up at deploy time
+# with amazon.aws.aws_secret; the controller needs AWS credentials).
+bridge_ntfy_token_secret_id: homelab/ntfy/admin-token
+bridge_aws_region: us-west-2
+
+# --- prometheus_stack / blackbox_exporter ---
+# Empty = latest chart. Pin once a known-good version is established.
+prometheus_stack_chart_version: ""
+blackbox_chart_version: ""
+
+# --- node_exporter ---
+node_exporter_version: "1.8.2"
+node_exporter_listen_address: "0.0.0.0:9100"
+# Per-host additions go in host_vars (see host_vars/nas.example.yml).
+node_exporter_mount_points_exclude_extra: ''
+
+# --- vector_agent ---
+# Loki NodePort on the k3s control node (kubernetes/logging-system/loki/service.yaml).
+vector_loki_endpoint: "http://k3s-main:31100"
+vector_scrape_interval: 60

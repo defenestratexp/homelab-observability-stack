@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ bridge_name }}
+  namespace: {{ bridge_namespace }}
+  labels:
+    app: {{ bridge_name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ bridge_name }}
+  template:
+    metadata:
+      labels:
+        app: {{ bridge_name }}
+    spec:
+      containers:
+        - name: bridge
+          image: {{ bridge_image }}:{{ bridge_image_tag }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--configs"
+            - "/etc/alertmanager-ntfy/config.yaml"
+          ports:
+            - name: http
+              containerPort: {{ bridge_listen_port }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager-ntfy
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          livenessProbe:
+            tcpSocket:
+              port: {{ bridge_listen_port }}
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            tcpSocket:
+              port: {{ bridge_listen_port }}
+            initialDelaySeconds: 2
+            periodSeconds: 10
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ bridge_name }}-config
+            items:
+              - key: config.yaml
+                path: config.yaml

@@ -1,0 +1,19 @@
+---
+# Defaults for the alertmanager_ntfy_bridge role.
+
+bridge_namespace: monitoring
+bridge_name: alertmanager-ntfy
+bridge_image: ghcr.io/alexbakker/alertmanager-ntfy
+bridge_image_tag: latest
+bridge_listen_port: 8000
+
+# ntfy configuration
+bridge_ntfy_baseurl: https://ntfy.example.com
+bridge_ntfy_token_secret_id: homelab/ntfy/admin-token
+bridge_ntfy_default_topic: monitoring
+
+# AWS region for Secrets Manager lookup
+bridge_aws_region: us-west-2
+
+# Local k3s kubeconfig path on k3s-main.
+bridge_kubeconfig: /etc/rancher/k3s/k3s.yaml

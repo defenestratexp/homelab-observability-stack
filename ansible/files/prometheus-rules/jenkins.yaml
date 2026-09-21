@@ -1,0 +1,99 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: jenkins-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: jenkins
+      interval: 30s
+      rules:
+        # Metrics come from files/homelab-jenkins-metrics.sh, published as
+        # node_exporter textfile metrics by a cron on k3s-util (the
+        # controller host). Deliberately NOT collected from a Jenkins agent:
+        # the whole point is to keep reporting when every agent is offline.
+
+        # The alert that was missing on 2026-09-14. Both agents went offline
+        # after a reboot and stayed that way for hours; the only Jenkins
+        # monitoring was an HTTP check on /login, which the controller served
+        # perfectly the entire time. Every build silently queued instead.
+        - alert: JenkinsAgentsAllOffline
+          expr: homelab_jenkins_agents_online_total == 0
+          for: 10m
+          labels:
+            topic: monitoring
+            remediation: human
+            severity: critical
+            host: k3s-util
+            service: "Jenkins agents"
+          annotations:
+            summary: "Jenkins has no build agents online - all builds are blocked"
+            description: "Every Jenkins build agent is offline, so nothing can run; jobs will queue indefinitely and scheduled work silently stops. Agents are SSH-launched and wedge permanently after an agent host reboots (the launcher parks on a dead SSH channel). Fix: disconnect THEN reconnect the node - connect alone fails with 'The Agent is connected, disconnect it before to try to connect it again'. See the Alert Runbook."
+
+        - alert: JenkinsAgentOffline
+          expr: homelab_jenkins_agent_online == 0
+          for: 30m
+          labels:
+            topic: monitoring
+            remediation: human
+            severity: warning
+            host: k3s-util
+            service: "Jenkins agent {{$labels.agent}}"
+          annotations:
+            summary: "Jenkins agent {{$labels.agent}} has been offline for 30m"
+            description: "Agent {{$labels.agent}} is offline. Jobs pinned to its label cannot run - jenkins-node-1 carries label 'ops' (service-health, logging-pipeline-health) and jenkins-node-2 carries 'ansible' (the homelab-ansible deploy job)."
+
+        - alert: JenkinsQueueBacklog
+          expr: homelab_jenkins_queue_length > 25
+          for: 20m
+          labels:
+            topic: monitoring
+            remediation: human
+            severity: warning
+            host: k3s-util
+            service: "Jenkins queue"
+          annotations:
+            summary: "Jenkins build queue has {{$value | printf \"%.0f\"}} items and is not draining"
+            description: "A healthy queue drains in seconds. A sustained backlog means executors are starved - usually one wedged build holding an executor while cron jobs keep stacking behind it. Check for a long-running build (see JenkinsBuildStuck) and inspect the queue in the Jenkins UI."
+
+        - alert: JenkinsBuildStuck
+          expr: homelab_jenkins_longest_running_build_seconds > 21600
+          for: 15m
+          labels:
+            topic: monitoring
+            remediation: human
+            severity: warning
+            host: k3s-util
+            service: "Jenkins build"
+          annotations:
+            summary: "A Jenkins build has been running for over 6 hours"
+            description: "The longest running build has exceeded 6 hours, which is well beyond any legitimate job here. A wedged build holds its executor forever and starves everything else - on 2026-09-14 homelab-updates-scheduled ran for 32 hours and let 655 builds stack up behind it. Find it in the Jenkins UI and abort it, then fix the cause (commonly an unreachable host still listed in an inventory group)."
+
+        - alert: JenkinsControllerDown
+          expr: homelab_jenkins_up == 0
+          for: 10m
+          labels:
+            topic: monitoring
+            remediation: human
+            severity: critical
+            host: k3s-util
+            service: "Jenkins controller"
+          annotations:
+            summary: "Jenkins controller API is not responding"
+            description: "The metrics collector on k3s-util cannot reach or authenticate against the Jenkins API at localhost:8080. Jenkins runs as a host java process (not a container, and not a systemd unit) with JENKINS_HOME=/var/jenkins_home. Check the process is alive and that the API token in /etc/homelab/jenkins-api.env is still valid."
+
+        # Guards against the collector itself dying: the textfile collector
+        # keeps serving the last file forever, so stale values would otherwise
+        # look healthy indefinitely.
+        - alert: JenkinsMetricsStale
+          expr: time() - homelab_jenkins_metrics_timestamp_seconds > 900
+          for: 10m
+          labels:
+            topic: monitoring
+            remediation: human
+            severity: warning
+            host: k3s-util
+            service: "Jenkins metrics"
+          annotations:
+            summary: "Jenkins metrics on k3s-util have stopped updating"
+            description: "homelab-jenkins-metrics.sh has not written its textfile in over 15 minutes, so every other Jenkins alert is now evaluating stale data and cannot be trusted. Check the root cron entry 'homelab-jenkins-metrics' on k3s-util and run /usr/local/bin/homelab-jenkins-metrics.sh by hand."

@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: logging-system
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        uid: loki
+        access: proxy
+        url: http://loki:3100
+        isDefault: true
+        editable: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-config
+  namespace: logging-system
+data:
+  grafana.ini: |
+    [server]
+    root_url = http://logs.example.internal
+
+    [security]
+    admin_user = admin
+    ; admin_password set via GF_SECURITY_ADMIN_PASSWORD__FILE env var
+
+    [users]
+    allow_sign_up = false
+
+    [auth.anonymous]
+    enabled = false
+
+    [log]
+    mode = console
+    level = info

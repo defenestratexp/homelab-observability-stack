@@ -1,0 +1,26 @@
+---
+# Vector agent defaults
+
+# Loki endpoint to send metrics
+vector_loki_endpoint: "http://k3s-main:31100"
+
+# Metrics collection interval in seconds
+vector_scrape_interval: 60
+
+# Which metrics to collect
+vector_collectors:
+  - cpu
+  - memory
+  - disk
+  - network
+  - load
+  - filesystem
+
+# Vector version to install
+vector_version: "0.34.1"
+
+# Vector config directory
+vector_config_dir: /etc/vector
+
+# Vector data directory
+vector_data_dir: /var/lib/vector

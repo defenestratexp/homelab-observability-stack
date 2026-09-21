@@ -1,0 +1,9 @@
+---
+# Deploy alertmanager-ntfy bridge into the monitoring namespace on k3s-main.
+# Phase 1 step 8 of the monitoring rollout.
+
+- hosts: k3s-main
+  become: true
+  gather_facts: false
+  roles:
+    - alertmanager_ntfy_bridge

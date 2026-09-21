@@ -1,0 +1,53 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: synthetic-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: synthetic
+      interval: 30s
+      rules:
+        # Any blackbox probe failing for 5 minutes. Covers public-facing
+        # (*.example.com) and internal-LAN (*.home.example.com)
+        # plus raw TCP (Postgres). Different `endpoint_class` labels let
+        # us split or filter per-class in dashboards.
+        - alert: EndpointDown
+          expr: probe_success == 0
+          for: 5m
+          labels:
+            topic: synthetic
+            severity: warning
+            remediation: human
+          annotations:
+            summary: "{{$labels.service}} on {{$labels.host}} is not responding"
+            description: "HTTP/TCP check for {{$labels.instance}} has failed for 5 minutes. Served by {{$labels.host}}. Likely: the backend service is down, nginx-proxy on k3s-util cannot reach it, or (public URLs) the Cloudflare tunnel is down."
+
+        # Slow probe — endpoint up but degraded. Useful as an early
+        # warning before EndpointDown trips. Threshold: 5 seconds.
+        - alert: EndpointSlow
+          expr: probe_duration_seconds > 5
+          for: 10m
+          labels:
+            topic: synthetic
+            severity: warning
+            remediation: human
+          annotations:
+            summary: "{{$labels.service}} on {{$labels.host}} is slow (>5s)"
+            description: "{{$labels.instance}} has taken over 5 seconds to respond for 10 minutes. Served by {{$labels.host}}. Backend slowdown, network congestion, or nginx-proxy under load."
+
+        # TLS expiring soon — for HTTPS probes, the blackbox-exporter
+        # exposes probe_ssl_earliest_cert_expiry as a unix timestamp.
+        # Alert if any cert expires within 14 days.
+        - alert: TlsCertExpiringSoon
+          expr: |
+            probe_ssl_earliest_cert_expiry - time() < (14 * 86400)
+            and probe_ssl_earliest_cert_expiry > 0
+          for: 1h
+          labels:
+            topic: synthetic
+            severity: warning
+            remediation: human
+          annotations:
+            summary: "{{$labels.service}} on {{$labels.host}} — TLS cert expires in < 14 days"
+            description: "Cert for {{$labels.instance}} is within 14 days of expiry. For *.home.example.com check the LE auto-renewal cron on k3s-util; for *.example.com check Cloudflare Edge cert state."

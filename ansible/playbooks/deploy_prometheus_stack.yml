@@ -1,0 +1,9 @@
+---
+# Deploy kube-prometheus-stack on k3s-main.
+# Phase 1 of the homelab monitoring rollout.
+
+- hosts: k3s-main
+  become: true
+  gather_facts: false
+  roles:
+    - prometheus_stack

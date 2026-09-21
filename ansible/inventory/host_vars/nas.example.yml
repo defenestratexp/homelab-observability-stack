@@ -1,0 +1,8 @@
+---
+# Per-host overrides for the NAS (copy to host_vars/nas.yml).
+# /mnt/media/{toons,bjj,music} are bind mounts onto /mnt/media3/<X>.
+# The underlying filesystem is already monitored via /mnt/media3, so the
+# bind-mount duplicates would multiply alerts on the same physical
+# filesystem. node_exporter drops them at scrape time so the alert rules
+# don't have to filter.
+node_exporter_mount_points_exclude_extra: '|^/mnt/media/(toons|bjj|music)($|/)'
