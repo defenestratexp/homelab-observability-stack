@@ -1,0 +1,54 @@
+direction: down
+
+fleet: LAN hosts {
+  grid-columns: 1
+  ne: node_exporter\n(systemd, :9100)
+  rs: rsyslog\n+ 1/min heartbeat
+  va: Vector agent\n(host metrics)
+}
+
+k3s: k3s-main {
+  grid-columns: 2
+  mon: monitoring namespace {
+    direction: down
+    prom: Prometheus\n(kube-prometheus-stack)
+    bb: blackbox-exporter
+    am: Alertmanager
+    bridge: alertmanager-ntfy bridge
+    bb -> prom: Probe CRDs
+    prom -> am: alerts
+    am -> bridge: webhook
+  }
+  log: logging-system namespace {
+    direction: down
+    vec: Vector DaemonSet\n(pod logs + syslog UDP)
+    loki: Loki {shape: cylinder}
+    graf: Grafana
+    vec -> loki
+    loki -> graf
+  }
+}
+
+jenkins: Jenkins {
+  grid-columns: 1
+  sh: service-health job
+  lh: logging-health job
+  jm: controller metrics cron\n(textfile collector)
+}
+
+hc: Healthchecks.io {shape: cloud}
+worker: Cloudflare Worker\n(hc-ntfy-bridge) {shape: cloud}
+ntfy: ntfy server {shape: cloud}
+phone: phone {shape: person}
+
+fleet.ne -> k3s.mon.prom: scrape
+fleet.rs -> k3s.log.vec: UDP 31514
+fleet.va -> k3s.log.loki: push (NodePort 31100)
+jenkins.jm -> k3s.mon.prom: scraped via node_exporter
+jenkins.lh -> k3s.log.loki: marker + heartbeat query
+jenkins.sh -> hc: dead-man ping
+k3s.mon.bridge -> ntfy: HTTPS
+jenkins.sh -> ntfy: notifyNtfy
+jenkins.lh -> ntfy: notifyNtfy
+hc -> worker -> ntfy
+ntfy -> phone

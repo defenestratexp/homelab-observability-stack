@@ -6,37 +6,7 @@ This is a curated extract from a working homelab. The code runs in production th
 
 ## Architecture
 
-```mermaid
-flowchart LR
-  subgraph fleet[LAN hosts]
-    NE[node_exporter<br/>systemd, :9100]
-    RS[rsyslog + 1/min heartbeat]
-    VA[Vector agent<br/>host metrics]
-  end
-
-  subgraph k3s[k3s-main]
-    subgraph mon[monitoring ns]
-      P[Prometheus<br/>kube-prometheus-stack]
-      BB[blackbox-exporter]
-      AM[Alertmanager]
-      BR[alertmanager-ntfy bridge]
-    end
-    subgraph log[logging-system ns]
-      V[Vector DaemonSet<br/>pod logs + syslog UDP]
-      L[Loki]
-      G[Grafana]
-    end
-  end
-
-  NE -- scrape --> P
-  BB -- Probe CRDs --> P
-  P -- alerts --> AM -- webhook --> BR -- HTTPS --> N[(ntfy<br/>ntfy.example.com)]
-  RS -- UDP 31514 --> V --> L
-  VA -- push --> L
-  L --> G
-  J[Jenkins jobs<br/>service-health, logging-health] -- notifyNtfy --> N
-  HC[Healthchecks.io] -- Cloudflare Worker --> N
-```
+![Architecture: fleet exporters and syslog feed Prometheus and Loki on k3s; alerts go through Alertmanager and the ntfy bridge](docs/diagrams/architecture.png)
 
 ### Metrics and alerting
 
@@ -44,7 +14,7 @@ flowchart LR
 - **node_exporter fleet** (`roles/node_exporter`): a pinned release installed as a hardened systemd unit on every `monitored_hosts` member. NFS/CIFS filesystems are excluded from the filesystem collector so a stalled NAS can't hang the scrape and make healthy clients look down. The textfile collector is enabled for custom metrics. LAN hosts are scraped by a static `node-exporter-lan` job that sets a friendly `instance` label per host.
 - **Blackbox probes** (`roles/blackbox_exporter` + `files/prometheus-rules/probes.yaml`): Probe CRDs for public HTTPS endpoints, internal HTTPS endpoints behind the reverse proxy, and raw TCP (Postgres, NFS, rpcbind). `metricRelabelings` stamp each target with the `host` that serves it and a human `service` name.
 - **Alert rules** (`files/prometheus-rules/`): `host.yaml` (HostDown, disk, inodes, memory, swap-in pressure, CPU, read-only FS, NFS client stalls), `synthetic.yaml` (EndpointDown, EndpointSlow, TLS expiry), and `jenkins.yaml` (no agents online, queue backlog, stuck build, controller down, stale metrics). The Jenkins alerts read textfile metrics that `files/homelab-jenkins-metrics.sh` writes from cron on the controller, so they keep working when every build agent is offline.
-- **Alert shaping** (`additionalAlertRelabelConfigs`): every alert is guaranteed a `topic` (chart alerts → `cluster`, anything else without one → `monitoring`), a `severity`, a `host` and a `service`. Plumbing labels are dropped so the phone notification isn't buried in tags.
+- **Alert shaping** (`additionalAlertRelabelConfigs`): every alert is guaranteed a `topic` (chart alerts → `cluster`, anything else without one → `monitoring`), a `severity` and a `host`; bundled chart alerts have their k8s `service` label blanked so the bridge falls back to the alert name. Plumbing labels are dropped so the phone notification isn't buried in tags.
 - **Alertmanager routing**: everything goes to the ntfy bridge, except `Watchdog`, `InfoInhibitor` and `TargetDown` for the LAN job (which duplicates HostDown without naming the host), which go to a null receiver. Inhibition rules:
   - `HostDown` suppresses every other alert with the same `host`, so a dead box sends one notification instead of a dozen.
   - `EndpointDown` suppresses `EndpointSlow` for the same instance.
@@ -63,6 +33,10 @@ flowchart LR
   ```
 
   The bridge reads its config only at startup, so the role restarts the Deployment whenever the rendered Secret changes.
+
+The path an alert takes from rule to phone:
+
+![Alert flow: relabelling, routing, inhibition and the ntfy message format](docs/diagrams/alert-flow.png)
 
 ### Logging
 
@@ -117,7 +91,7 @@ services/
 - A k3s cluster (the roles assume `/usr/local/bin/k3s` and `/etc/rancher/k3s/k3s.yaml` on the control node), with the `local-path` storage class and an NFS export for Loki.
 - Ansible with the `amazon.aws` collection (plus boto3) on the controller. The ntfy token and Jenkins API token are read from AWS Secrets Manager (`homelab/ntfy/admin-token`, `homelab/jenkins/api-token`).
 - A self-hosted [ntfy](https://ntfy.sh) server.
-- Jenkins, with a shared library (`homelab-jenkins-lib`) that provides `notifyNtfy` and `notifyJenkinsBuild`. **That library is not included here**; both steps are thin wrappers that POST to ntfy.
+- Jenkins, with a shared library loaded as `homelab-jenkins-lib` that provides `notifyNtfy` and `notifyJenkinsBuild`. It is not part of this repo; it is published separately as [jenkins-shared-library](https://github.com/defenestratexp/jenkins-shared-library) (register it under that name, or change the `@Library` line in the Jenkinsfiles).
 - `node_exporter` hosts must use systemd. The role fails loudly on SysV hosts. `vector_agent` handles both.
 
 ## Getting started
@@ -133,7 +107,7 @@ ansible-playbook playbooks/deploy_prometheus_stack.yml
 
 ## Not included
 
-- The shared Jenkins library, the nginx reverse proxy and LAN CoreDNS, and the ntfy server itself.
+- The shared Jenkins library (see Requirements), the nginx reverse proxy and LAN CoreDNS, and the ntfy server itself.
 - The Vector DaemonSet for the second (`k3s-util`) cluster, and the standalone Docker-log Vector container. The logging README describes them, but their manifests live elsewhere.
 - Two Grafana dashboards (fleet overview, host metrics) that the original deployment mounted but that were never committed alongside these manifests. They are removed from `grafana/deployment.yaml` here.
 

@@ -1,0 +1,39 @@
+direction: down
+
+rule: "PrometheusRule fires\n(host, synthetic, jenkins, bundled chart rules)"
+
+relabel: "Prometheus alert relabelling" {
+  grid-columns: 1
+  r1: "topic label: chart alerts get cluster, anything else without one gets monitoring"
+  r2: "severity label: defaults to warning"
+  r3: "host label: cluster node IP mapped to a name, otherwise copied from instance"
+  r4: "service label: the chart's k8s service name is blanked"
+  r5: "plumbing labels dropped (namespace, pod, prometheus, ...)"
+}
+
+am: "Alertmanager" {
+  direction: down
+  route: "Routing" {
+    drop: "null receiver\nWatchdog, InfoInhibitor,\nTargetDown for node-exporter-lan"
+    hook: "ntfy bridge webhook\n(everything else)"
+  }
+  inhibit: "Inhibition" {
+    grid-columns: 1
+    i1: "HostDown mutes every other alert with the same host"
+    i2: "EndpointDown mutes EndpointSlow for the same instance"
+    i3: "critical mutes warning for the same host + service"
+  }
+  route.hook -> inhibit
+}
+
+bridge: "alertmanager-ntfy bridge" {
+  grid-columns: 1
+  t: "ntfy topic = topic label"
+  p: "priority from severity\n(critical high, warning default, else low)"
+  m: "title: [CRIT|WARN|OK] host · service\nbody: summary, HOST, SERVICE, STATE, CHECK"
+}
+
+ntfy: "ntfy topic" {shape: cloud}
+
+rule -> relabel -> am.route
+am.inhibit -> bridge -> ntfy

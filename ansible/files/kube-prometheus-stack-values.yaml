@@ -310,7 +310,7 @@ alertmanager:
         target_matchers:
           - alertname != "HostDown"
         equal: ['host']
-      # A down endpoint is trivially also a slow endpoint - audit.home fired
+      # A down endpoint is trivially also a slow endpoint - an internal site fired
       # both at the same second, every time. Keep the actionable one.
       - source_matchers:
           - alertname = "EndpointDown"
