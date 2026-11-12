@@ -1,54 +1,80 @@
-direction: down
+# Renders only inside the N9N d2 pipeline (filer icon library + lib/style.d2); docs/diagrams/architecture.png is the published image.
+...@../../lib/style.d2
+...@/mnt/n9n/assets/icons/d2/simple.d2
+...@/mnt/n9n/assets/icons/d2/cncf.d2
+...@/mnt/n9n/assets/icons/d2/tabler.d2
 
-fleet: LAN hosts {
+vars: {d2-config: {layout-engine: dagre}}
+
+direction: right
+grid-rows: 2
+grid-columns: 2
+grid-gap: 100
+
+title: "Homelab observability stack — architecture" {class: title}
+
+fleet: "LAN hosts" {
+  class: zone
+  pad: "" {style.opacity: 0; width: 200; height: 1}
+  direction: right
+  ne: "node_exporter\n(systemd, :9100)" {class: [small; simple-prometheus]}
+  rs: "rsyslog\n+ 1/min heartbeat" {class: [small; tabler-logs]}
+  va: "Vector agent\n(host metrics)" {class: [small; tabler-route]}
+}
+
+k3s: "k3s-main" {
+  class: zone
   grid-columns: 1
-  ne: node_exporter\n(systemd, :9100)
-  rs: rsyslog\n+ 1/min heartbeat
-  va: Vector agent\n(host metrics)
-}
-
-k3s: k3s-main {
-  grid-columns: 2
-  mon: monitoring namespace {
-    direction: down
-    prom: Prometheus\n(kube-prometheus-stack)
-    bb: blackbox-exporter
-    am: Alertmanager
-    bridge: alertmanager-ntfy bridge
-    bb -> prom: Probe CRDs
-    prom -> am: alerts
-    am -> bridge: webhook
+  grid-gap: 60
+  mon: "monitoring namespace" {
+    class: subzone
+    direction: right
+    bb: "blackbox-exporter" {class: [small; tabler-radar]}
+    prom: "Prometheus\n(kube-prometheus-stack)" {class: [svc; cncf-prometheus]}
+    am: "Alertmanager" {class: [small; tabler-bell]}
+    bridge: "alertmanager-ntfy\nbridge" {class: [small; tabler-webhook]}
+    prom <-> bb: Probe CRDs {class: flow; target-arrowhead.shape: none}
+    prom -> am: alerts {class: flow}
+    am -> bridge: webhook {class: flow}
   }
-  log: logging-system namespace {
-    direction: down
-    vec: Vector DaemonSet\n(pod logs + syslog UDP)
-    loki: Loki {shape: cylinder}
-    graf: Grafana
-    vec -> loki
-    loki -> graf
+  log: "logging-system namespace" {
+    class: subzone
+    direction: right
+    vec: "Vector DaemonSet\n(pod logs + syslog UDP)" {class: [small; tabler-route]}
+    loki: "Loki" {class: [svc; tabler-database]}
+    graf: "Grafana" {class: [svc; simple-grafana]}
+    loki <-> vec: {class: flow; target-arrowhead.shape: none}
+    loki -> graf {class: flow}
   }
 }
 
-jenkins: Jenkins {
-  grid-columns: 1
-  sh: service-health job
-  lh: logging-health job
-  jm: controller metrics cron\n(textfile collector)
+jenkins: "Jenkins" {
+  class: zone
+  pad: "" {style.opacity: 0; width: 200; height: 1}
+  direction: right
+  jm: "controller\nmetrics cron\n(textfile collector,\nscraped via\nnode_exporter)" {class: [small; tabler-clock]}
+  lh: "logging-health job" {class: [small; tabler-file-search]}
+  sh: "service-health job" {class: [small; tabler-heart-rate-monitor]}
 }
 
-hc: Healthchecks.io {shape: cloud}
-worker: Cloudflare Worker\n(hc-ntfy-bridge) {shape: cloud}
-ntfy: ntfy server {shape: cloud}
-phone: phone {shape: person}
+alerting: "" {
+  style: {fill: transparent; stroke: transparent}
+  direction: right
+  hc: "Healthchecks.io" {class: [small; tabler-clock-check]}
+  worker: "Cloudflare Worker\n(hc-ntfy-bridge)" {class: [small; simple-cloudflareworkers]}
+  ntfy: "ntfy server" {class: [svc; simple-ntfy]}
+  phone: "Phone" {class: [svc; tabler-device-mobile]}
+  hc -> worker {class: flow}
+  worker -> ntfy {class: flow}
+  ntfy -> phone {class: flow}
+}
 
-fleet.ne -> k3s.mon.prom: scrape
-fleet.rs -> k3s.log.vec: UDP 31514
-fleet.va -> k3s.log.loki: push (NodePort 31100)
-jenkins.jm -> k3s.mon.prom: scraped via node_exporter
-jenkins.lh -> k3s.log.loki: marker + heartbeat query
-jenkins.sh -> hc: dead-man ping
-k3s.mon.bridge -> ntfy: HTTPS
-jenkins.sh -> ntfy: notifyNtfy
-jenkins.lh -> ntfy: notifyNtfy
-hc -> worker -> ntfy
-ntfy -> phone
+fleet.ne -> k3s.mon.prom: scrape {class: flow}
+fleet.rs -> k3s.log.vec: UDP 31514 {class: flow}
+fleet.va -> k3s.log.loki: "push\n(NodePort 31100)" {class: flow}
+jenkins.jm -> k3s.mon.prom {class: flow}
+jenkins.lh -> k3s.log.loki: "marker +\nheartbeat query" {class: flow}
+jenkins.sh -> alerting.hc: dead-man ping {class: flow}
+k3s.mon.bridge -> alerting.ntfy: HTTPS {class: flow}
+jenkins.sh -> alerting.ntfy: notifyNtfy {class: flow}
+jenkins.lh -> alerting.ntfy: notifyNtfy {class: flow}

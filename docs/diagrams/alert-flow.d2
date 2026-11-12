@@ -1,39 +1,64 @@
-direction: down
+# Renders only inside the N9N d2 pipeline (filer icon library + lib/style.d2); docs/diagrams/alert-flow.png is the published image.
+...@../../lib/style.d2
+...@/mnt/n9n/assets/icons/d2/simple.d2
+...@/mnt/n9n/assets/icons/d2/cncf.d2
+...@/mnt/n9n/assets/icons/d2/tabler.d2
 
-rule: "PrometheusRule fires\n(host, synthetic, jenkins, bundled chart rules)"
+vars: {d2-config: {layout-engine: dagre}}
+
+direction: down
+grid-columns: 1
+grid-gap: 70
+
+title: "Homelab observability stack — alert flow" {class: title}
+
+rule: "PrometheusRule fires\n(host, synthetic, jenkins, bundled chart rules)" {class: [svc; cncf-prometheus]}
 
 relabel: "Prometheus alert relabelling" {
-  grid-columns: 1
-  r1: "topic label: chart alerts get cluster, anything else without one gets monitoring"
-  r2: "severity label: defaults to warning"
-  r3: "host label: cluster node IP mapped to a name, otherwise copied from instance"
-  r4: "service label: the chart's k8s service name is blanked"
-  r5: "plumbing labels dropped (namespace, pod, prometheus, ...)"
+  class: zone
+  grid-rows: 2
+  grid-gap: 16
+  r1: "topic: chart alerts get cluster;\nanything else without one\ngets monitoring" {class: card}
+  r2: "severity: defaults to warning" {class: card}
+  r3: "host: cluster node IP mapped\nto a name, otherwise copied\nfrom instance" {class: card}
+  r4: "service: the chart's k8s\nservice name is blanked" {class: card}
+  r5: "plumbing labels dropped\n(namespace, pod, prometheus, ...)" {class: card}
 }
 
 am: "Alertmanager" {
-  direction: down
+  class: zone
+  grid-columns: 2
+  grid-gap: 80
   route: "Routing" {
-    drop: "null receiver\nWatchdog, InfoInhibitor,\nTargetDown for node-exporter-lan"
-    hook: "ntfy bridge webhook\n(everything else)"
+    class: subzone
+    grid-columns: 1
+    grid-gap: 40
+    drop: "null receiver\nWatchdog, InfoInhibitor,\nTargetDown for\nnode-exporter-lan" {class: [small; tabler-bell-off]}
+    hook: "ntfy bridge webhook\n(everything else)" {class: [small; tabler-webhook]}
   }
   inhibit: "Inhibition" {
+    class: subzone
     grid-columns: 1
-    i1: "HostDown mutes every other alert with the same host"
-    i2: "EndpointDown mutes EndpointSlow for the same instance"
-    i3: "critical mutes warning for the same host + service"
+    grid-gap: 16
+    i1: "HostDown mutes every other\nalert with the same host" {class: card}
+    i2: "EndpointDown mutes EndpointSlow\nfor the same instance" {class: card}
+    i3: "critical mutes warning for\nthe same host + service" {class: card}
   }
-  route.hook -> inhibit
+  route.hook -> inhibit {class: flow}
 }
 
 bridge: "alertmanager-ntfy bridge" {
-  grid-columns: 1
-  t: "ntfy topic = topic label"
-  p: "priority from severity\n(critical high, warning default, else low)"
-  m: "title: [CRIT|WARN|OK] host · service\nbody: summary, HOST, SERVICE, STATE, CHECK"
+  class: zone
+  grid-rows: 1
+  grid-gap: 16
+  t: "ntfy topic = topic label" {class: card}
+  p: "priority from severity\n(critical high, warning default,\nelse low)" {class: card}
+  m: "title: [CRIT|WARN|OK] host · service\nbody: summary, HOST, SERVICE,\nSTATE, CHECK, description" {class: card}
 }
 
-ntfy: "ntfy topic" {shape: cloud}
+ntfy: "ntfy topic" {class: [svc; simple-ntfy]}
 
-rule -> relabel -> am.route
-am.inhibit -> bridge -> ntfy
+rule -> relabel {class: flow}
+relabel -> am.route {class: flow}
+am.inhibit -> bridge {class: flow}
+bridge -> ntfy {class: flow}
